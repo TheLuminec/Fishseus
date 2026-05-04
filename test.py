@@ -2,7 +2,7 @@ from motion.motion_service import MotionService, MotorConfig
 from audio.audio_service import AudioService
 from stt.stt_service import SttService
 
-if __init__ == "__main__":
+if __name__ == "__main__":
     motors = {
         "mouth": MotorConfig(in1=17, in2=27, en=22, forward_speed=82, reverse_speed=55, neutral_return_time=0.04),
         "tail": MotorConfig(in1=23, in2=24, en=25, forward_speed=72, reverse_speed=48, neutral_return_time=0.03),
