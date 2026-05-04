@@ -1,6 +1,6 @@
 from motion.motion_service import MotionService, MotorConfig
 from audio.audio_service import AudioService
-from stt.stt_service import SttService
+from stt.stt_service import SttService, SttConfig
 
 if __name__ == "__main__":
     motors = {
@@ -14,8 +14,15 @@ if __name__ == "__main__":
 
     audio = AudioService()
     audio.initialize()
+
+    stt_config = SttConfig(
+        whisper_binary="./stt/whisper.cpp/build/bin/whisper-cli",
+        model_path="./stt/whisper.cpp/models/ggml-base.en.bin",
+        threads=2,
+        wake_words=("fish", "hey fish"),
+    )
     
-    stt = SttService()
+    stt = SttService(stt_config)
     stt.initialize()
     
     audio.start_capture()
