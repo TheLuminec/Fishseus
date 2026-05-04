@@ -104,7 +104,7 @@ class SttService:
     orchestrator can submit speech recordings without blocking the main loop.
     """
 
-    def __init__(self, config: SttConfig) -> None:
+    def __init__(self, config: SttConfig = SttConfig()) -> None:
         self.config = config
         self._initialized = False
         self._stop_event = threading.Event()
