@@ -16,7 +16,7 @@ if __name__ == "__main__":
     audio.initialize()
     
     stt = SttService()
-    stt.initalize()
+    stt.initialize()
     
     audio.start_capture()
     
