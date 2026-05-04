@@ -105,7 +105,7 @@ class MotionService:
 
             self._hard_stop_all()
 
-            for name, pwm in list(self._pwms.items()):
+            for pwm in self._pwms.values():
                 pwm.ChangeDutyCycle(0)
                 pwm.stop()
 
