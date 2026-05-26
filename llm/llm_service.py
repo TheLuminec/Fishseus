@@ -74,7 +74,7 @@ class LlmConfig:
     #   "qwen2.5:3b"
     #   "mistral"
     #   "devstral"
-    model: str = "gemma4:e2b"
+    model: str = "qwen2.5:3b"
 
     api_key: Optional[str] = None
 

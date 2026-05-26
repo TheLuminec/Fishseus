@@ -44,7 +44,7 @@ class MotionService:
         tail_wiggle_time: float = 0.14,
         mouth_open_time: float = 0.09,
         mouth_close_time: float = 0.04,
-        envelope_window_s: float = 0.03,
+        envelope_window_s: float = 0.18,
     ) -> None:
         self.motors = motors
         self.pwm_frequency = pwm_frequency
