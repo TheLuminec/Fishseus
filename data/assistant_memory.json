@@ -1,7 +1,6 @@
 {
   "profile": {
-    "assistant_name": "Fishseus",
-    "user_name": "Caleb"
+    "assistant_name": "Fishseus"
   },
   "preferences": {
     "response_style": "brief, helpful, technical when needed",
