@@ -4,249 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fishseus Control Panel</title>
-    <style>
-        /* Reset some basic elements */
-        * {
-            box-sizing: border-box;
-        }
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            background: #f5f6fa;
-            color: #333;
-            margin: 0;
-            padding: 0;
-        }
-        header {
-            background: #343a40;
-            color: #fff;
-            padding: 20px 40px;
-            text-align: center;
-        }
-        nav {
-            background: #4c566a;
-            padding: 10px 40px;
-            display: flex;
-            flex-wrap: wrap;
-        }
-        nav a {
-            color: #ffffff;
-            margin-right: 20px;
-            text-decoration: none;
-            padding: 8px 12px;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-        nav a:hover {
-            background: #2e3440;
-        }
-        main {
-            padding: 20px 40px;
-        }
-        section {
-            background: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-            padding: 20px;
-        }
-        section h2 {
-            color: #2c3e50;
-            margin-top: 0;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-group input,
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        .form-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-        .form-actions {
-            margin-top: 20px;
-        }
-        button {
-            background: #007bff;
-            color: #ffffff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-right: 10px;
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        .motor-controls input {
-            width: 80px;
-        }
-        .motor-controls .motor-row {
-            display: flex;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .motor-controls .motor-row label {
-            width: 110px;
-            margin-right: 10px;
-        }
-        .motor-controls .motor-row input {
-            margin-right: 6px;
-        }
-    
-        /* Fishseus modern overrides */
-        :root {
-            --bg: #0f172a;
-            --panel: rgba(255,255,255,0.92);
-            --panel-border: rgba(15,23,42,0.08);
-            --text: #172033;
-            --muted: #64748b;
-            --accent: #0891b2;
-            --accent-dark: #0e7490;
-            --danger: #dc2626;
-            --danger-dark: #b91c1c;
-            --shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
-        }
-        body {
-            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: radial-gradient(circle at top left, #cffafe 0, transparent 36%),
-                        radial-gradient(circle at top right, #ddd6fe 0, transparent 32%),
-                        linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
-            color: var(--text);
-        }
-        header {
-            background: linear-gradient(135deg, #0f172a, #164e63);
-            padding: 28px 40px;
-            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
-        }
-        header h1 {
-            margin: 0;
-            letter-spacing: -0.04em;
-            font-size: 34px;
-        }
-        nav {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            background: rgba(15, 23, 42, 0.88);
-            backdrop-filter: blur(12px);
-            gap: 8px;
-        }
-        nav a {
-            margin-right: 0;
-            font-weight: 700;
-            color: #e0f2fe;
-        }
-        nav a:hover {
-            background: rgba(14, 165, 233, 0.18);
-        }
-        main {
-            max-width: 1180px;
-            margin: 0 auto;
-            padding: 28px 24px 60px;
-        }
-        section {
-            background: var(--panel);
-            border: 1px solid var(--panel-border);
-            border-radius: 18px;
-            box-shadow: var(--shadow);
-            padding: 24px;
-        }
-        section h2 {
-            color: #0f172a;
-            letter-spacing: -0.02em;
-        }
-        input, textarea, select {
-            border: 1px solid #cbd5e1 !important;
-            border-radius: 10px !important;
-            background: rgba(255,255,255,0.86);
-        }
-        input:focus, textarea:focus {
-            outline: 2px solid rgba(8,145,178,0.22);
-            border-color: var(--accent) !important;
-        }
-        button {
-            background: var(--accent);
-            border-radius: 999px;
-            font-weight: 800;
-            box-shadow: 0 8px 20px rgba(8,145,178,0.20);
-        }
-        button:hover {
-            background: var(--accent-dark);
-        }
-        .danger-button {
-            background: var(--danger) !important;
-        }
-        .danger-button:hover {
-            background: var(--danger-dark) !important;
-        }
-        .secondary-button {
-            background: #475569 !important;
-        }
-        .inline-status {
-            margin-top: 12px;
-            min-height: 22px;
-            color: var(--muted);
-            font-weight: 700;
-        }
-        .inline-status.ok {
-            color: #047857;
-        }
-        .inline-status.error {
-            color: #b91c1c;
-        }
-        .status-pre {
-            margin-top: 14px;
-            background: #0b1220;
-            color: #bbf7d0;
-            padding: 16px;
-            border-radius: 14px;
-            overflow: auto;
-            min-height: 80px;
-        }
-        .test-panel {
-            margin-top: 18px;
-            padding: 18px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
-        }
-        .test-panel h3 {
-            margin-top: 0;
-        }
-        .test-row {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 10px;
-            margin-top: 12px;
-        }
-        .test-row input {
-            width: 90px;
-        }
-        .talk-output {
-            margin-top: 14px;
-            padding: 16px;
-            background: #ecfeff;
-            border: 1px solid #a5f3fc;
-            border-radius: 14px;
-            font-weight: 800;
-            min-height: 52px;
-        }
-    </style>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <header>
@@ -260,18 +18,13 @@
         <a href="#tts">TTS</a>
         <a href="#motion">Motion</a>
         <a href="#personality">Personality</a>
-        <a href="#talk">Talk</a>
     </nav>
-    <main>
+        <!-- Status message area -->
+        <div id="status"></div>
+        <main>
         <section id="dashboard">
             <h2>Dashboard</h2>
-            <p>Welcome to your Fishseus configuration panel. Tune the assistant, test motors, and reload runtime services after config edits.</p>
-            <div class="form-actions">
-                <button id="refresh_status">Refresh Status</button>
-                <button id="reset_services" class="danger-button">Reset Runtime Services</button>
-            </div>
-            <div id="global_status" class="inline-status">Ready.</div>
-            <pre id="status_output" class="status-pre">Status not loaded yet.</pre>
+            <p>Welcome to your Fishseus configuration panel. Use the sections below to adjust settings for audio capture, speech recognition, language model configuration, text-to-speech, and motor control. You can also edit the assistant personality prompt.</p>
         </section>
 
         <!-- Audio Settings -->
@@ -310,9 +63,8 @@
                 <input type="number" id="pre_roll" value="0.4" step="0.1">
             </div>
             <div class="form-actions">
-                <button>Save Audio Settings</button>
+                <button id="save_audio">Save Audio Settings</button>
             </div>
-            <div id="audio_status" class="inline-status"></div>
         </section>
 
         <!-- STT Settings -->
@@ -335,9 +87,8 @@
                 <input type="text" id="wake_words" value="fish, fishseus, hey fish">
             </div>
             <div class="form-actions">
-                <button>Save STT Settings</button>
+                <button id="save_stt">Save STT Settings</button>
             </div>
-            <div id="stt_status" class="inline-status"></div>
         </section>
 
         <!-- LLM Settings -->
@@ -363,9 +114,8 @@
                 <label><input type="checkbox" id="disable_reasoning" checked> Disable Reasoning</label>
             </div>
             <div class="form-actions">
-                <button>Save LLM Settings</button>
+                <button id="save_llm">Save LLM Settings</button>
             </div>
-            <div id="llm_status" class="inline-status"></div>
         </section>
 
         <!-- TTS Settings -->
@@ -392,9 +142,8 @@
                 <input type="text" id="tts_output" value="../tmp/tts">
             </div>
             <div class="form-actions">
-                <button>Save TTS Settings</button>
+                <button id="save_tts">Save TTS Settings</button>
             </div>
-            <div id="tts_status" class="inline-status"></div>
         </section>
 
         <!-- Motion Settings -->
@@ -428,12 +177,18 @@
                 </div>
             </div>
             <div class="form-actions">
-                <button>Save Motor Settings</button>
-                <button>Open Mouth</button>
-                <button onclick="alert('Wiggle triggered')">Wiggle</button>
-                <input type="number" value="2" min="1" max="5" style="width:60px;"> cycles
+                <button id="save_motion">Save Motor Settings</button>
+                <!-- Mouth test controls -->
+                <label for="mouth_duration">Duration (s)</label>
+                <input type="number" id="mouth_duration" value="0.09" step="0.01" style="width:80px;" min="0.01">
+                <label for="mouth_speed">Speed</label>
+                <input type="number" id="mouth_speed" value="82" step="1" min="0" max="100" style="width:60px;">
+                <button id="open_mouth">Open Mouth</button>
+                <button id="wiggle_btn">Wiggle</button>
+                <input type="number" id="wiggle_cycles" value="2" min="1" max="5" style="width:60px;"> cycles
+                <button id="reset_services">Reset Services</button>
+                <button id="stop_motion">Stop Motion</button>
             </div>
-            <div id="motion_status" class="inline-status"></div>
         </section>
 
         <!-- Personality Editor -->
@@ -465,217 +220,270 @@ Rules:
             <div class="form-actions">
                 <button>Save Personality Prompt</button>
             </div>
-            <div id="personality_status" class="inline-status"></div>
         </section>
-</body>
-</html>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const $ = (id) => document.getElementById(id);
 
-        function setStatus(id, message, ok = true) {
-            const el = $(id) || $('global_status');
-            if (!el) return;
-            el.textContent = message;
-            el.classList.remove('ok', 'error');
-            el.classList.add(ok ? 'ok' : 'error');
+        <!-- Talk Section -->
+        <section id="talk">
+            <h2>Talk to Fish</h2>
+            <p>Type a message below and send it to your assistant.  The response will appear below.</p>
+            <div class="form-group">
+                <label for="talk_input">Your Message</label>
+                <input type="text" id="talk_input" placeholder="Say something to Fish...">
+            </div>
+            <button id="talk_send">Send</button>
+            <div id="talk_output" style="margin-top: 10px; font-weight: bold; min-height: 20px;"></div>
+        </section>
+    </main>
+    <!-- Talk script -->
+    <script>
+    // Simple talk feature and configuration UI handlers
+    document.addEventListener('DOMContentLoaded', function() {
+        // Elements
+        const sendBtn = document.getElementById('talk_send');
+        const inputField = document.getElementById('talk_input');
+        const outputDiv = document.getElementById('talk_output');
+        const saveAudioBtn = document.getElementById('save_audio');
+        const saveSttBtn = document.getElementById('save_stt');
+        const saveLlmBtn = document.getElementById('save_llm');
+        const saveTtsBtn = document.getElementById('save_tts');
+        const saveMotionBtn = document.getElementById('save_motion');
+        const openMouthBtn = document.getElementById('open_mouth');
+        const wiggleBtn = document.getElementById('wiggle_btn');
+        const wiggleCyclesInput = document.getElementById('wiggle_cycles');
+        const mouthDurationInput = document.getElementById('mouth_duration');
+        const mouthSpeedInput = document.getElementById('mouth_speed');
+        const resetBtn = document.getElementById('reset_services');
+        const stopBtn = document.getElementById('stop_motion');
+        const statusDiv = document.getElementById('status');
+
+        // Utility to show a status message
+        function showStatus(msg, isError = false) {
+            statusDiv.innerText = msg;
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = isError ? '#f8d7da' : '#e2e3e5';
+            statusDiv.style.color = isError ? '#721c24' : '#155724';
+            // Hide after a few seconds
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
         }
 
-        function postJson(url, data) {
-            return fetch(url, {
+        // Utility to update a config section
+        function updateSection(sectionName, data) {
+            fetch('/api/' + sectionName, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data || {})
-            }).then(async resp => {
-                const json = await resp.json().catch(() => ({}));
-                if (!resp.ok || json.ok === false) {
-                    throw new Error(json.error || json.status || ('HTTP ' + resp.status));
-                }
-                return json;
-            });
-        }
-
-        function updateSection(sectionName, data, statusId) {
-            setStatus(statusId, 'Saving ' + sectionName + '...');
-            postJson('/api/' + sectionName, data)
+                body: JSON.stringify(data),
+            })
+                .then(resp => resp.json())
                 .then(data => {
-                    setStatus(statusId, data.status || ('Saved ' + sectionName + '.'), true);
-                    if (sectionName === 'motion') {
-                        setStatus(statusId, 'Saved motion. Press “Reset Runtime Services” if motion was already initialized.', true);
+                    if (data.status) {
+                        showStatus('Saved ' + sectionName + ' settings.');
+                    } else if (data.error) {
+                        showStatus('Error saving ' + sectionName + ': ' + data.error, true);
+                    } else {
+                        showStatus('Saved ' + sectionName + ' settings.');
                     }
                 })
-                .catch(err => setStatus(statusId, 'Error saving ' + sectionName + ': ' + err.message, false));
+                .catch(err => {
+                    showStatus('Error saving ' + sectionName + ': ' + err, true);
+                });
         }
 
-        function refreshStatus() {
-            const out = $('status_output');
-            if (!out) return;
-            out.textContent = 'Loading status...';
-            fetch('/api/status')
+        // Talk handler
+        sendBtn.addEventListener('click', function() {
+            const message = inputField.value.trim();
+            if (!message) {
+                outputDiv.innerText = 'Please enter a message.';
+                return;
+            }
+            outputDiv.innerText = 'Thinking...';
+            fetch('/api/talk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: message })
+            })
                 .then(resp => resp.json())
-                .then(data => { out.textContent = JSON.stringify(data, null, 2); })
-                .catch(err => { out.textContent = 'Status error: ' + err; });
-        }
+                .then(data => {
+                    outputDiv.innerText = data.reply || 'No response.';
+                })
+                .catch(err => {
+                    outputDiv.innerText = 'Error: ' + err;
+                });
+        });
 
-        const refreshStatusBtn = $('refresh_status');
-        if (refreshStatusBtn) {
-            refreshStatusBtn.addEventListener('click', refreshStatus);
-            refreshStatus();
-        }
+        // Audio save
+        saveAudioBtn.addEventListener('click', function() {
+            const audioData = {
+                device: document.getElementById('audio_device').value,
+                sample_rate: parseInt(document.getElementById('sample_rate').value),
+                channels: parseInt(document.getElementById('channels').value),
+                speech_threshold: parseFloat(document.getElementById('speech_threshold').value),
+                silence_threshold: parseFloat(document.getElementById('silence_threshold').value),
+                silence_timeout_s: parseFloat(document.getElementById('silence_timeout').value),
+                max_record_seconds: parseFloat(document.getElementById('max_record').value),
+                pre_roll_seconds: parseFloat(document.getElementById('pre_roll').value),
+            };
+            updateSection('audio', audioData);
+        });
 
-        const resetServicesBtn = $('reset_services');
-        if (resetServicesBtn) {
-            resetServicesBtn.addEventListener('click', function() {
-                setStatus('global_status', 'Resetting runtime services...');
-                postJson('/api/services/reset', {})
-                    .then(data => {
-                        setStatus('global_status', data.status || 'Runtime services reset.', true);
-                        refreshStatus();
-                    })
-                    .catch(err => setStatus('global_status', 'Reset error: ' + err.message, false));
-            });
-        }
+        // STT save
+        saveSttBtn.addEventListener('click', function() {
+            const sttData = {
+                whisper_binary: document.getElementById('whisper_binary').value,
+                model_path: document.getElementById('whisper_model').value,
+                threads: parseInt(document.getElementById('whisper_threads').value),
+                wake_words: document.getElementById('wake_words').value.split(',').map(s => s.trim()).filter(Boolean),
+            };
+            updateSection('stt', sttData);
+        });
 
-        const sendBtn = $('talk_send');
-        if (sendBtn) {
-            sendBtn.addEventListener('click', function() {
-                const message = $('talk_input').value.trim();
-                if (!message) {
-                    setStatus('talk_status', 'Please enter a message.', false);
-                    return;
-                }
-                $('talk_output').textContent = 'Thinking...';
-                setStatus('talk_status', 'Sending message...');
-                postJson('/api/talk', { message: message, speak: false, animate: true })
-                    .then(data => {
-                        $('talk_output').textContent = data.reply || 'No response.';
-                        setStatus('talk_status', 'Response received.', true);
-                    })
-                    .catch(err => {
-                        $('talk_output').textContent = '';
-                        setStatus('talk_status', 'Talk error: ' + err.message, false);
-                    });
-            });
-        }
+        // LLM save
+        saveLlmBtn.addEventListener('click', function() {
+            const llmData = {
+                endpoint_url: document.getElementById('llm_endpoint').value,
+                model: document.getElementById('llm_model').value,
+                temperature: parseFloat(document.getElementById('llm_temperature').value),
+                max_tokens: parseInt(document.getElementById('llm_max_tokens').value),
+                disable_reasoning: document.getElementById('disable_reasoning').checked,
+            };
+            updateSection('llm', llmData);
+        });
 
-        const saveAudioBtn = $('save_audio');
-        if (saveAudioBtn) {
-            saveAudioBtn.addEventListener('click', function() {
-                updateSection('audio', {
-                    device: $('audio_device').value,
-                    sample_rate: parseInt($('sample_rate').value),
-                    channels: parseInt($('channels').value),
-                    speech_threshold: parseFloat($('speech_threshold').value),
-                    silence_threshold: parseFloat($('silence_threshold').value),
-                    silence_timeout_s: parseFloat($('silence_timeout').value),
-                    max_record_seconds: parseFloat($('max_record').value),
-                    pre_roll_seconds: parseFloat($('pre_roll').value),
-                }, 'audio_status');
-            });
-        }
+        // TTS save
+        saveTtsBtn.addEventListener('click', function() {
+            const ttsData = {
+                piper_binary: document.getElementById('piper_binary').value,
+                voices_dir: document.getElementById('voices_dir').value,
+                default_voice: document.getElementById('default_voice').value,
+                audio_device: document.getElementById('tts_device').value,
+                output_dir: document.getElementById('tts_output').value,
+            };
+            updateSection('tts', ttsData);
+        });
 
-        const saveSttBtn = $('save_stt');
-        if (saveSttBtn) {
-            saveSttBtn.addEventListener('click', function() {
-                updateSection('stt', {
-                    whisper_binary: $('whisper_binary').value,
-                    model_path: $('whisper_model').value,
-                    threads: parseInt($('whisper_threads').value),
-                    wake_words: $('wake_words').value.split(',').map(s => s.trim()).filter(Boolean),
-                }, 'stt_status');
-            });
-        }
+        // Motion save
+        saveMotionBtn.addEventListener('click', function() {
+            // Collect motor settings from the inputs.  They are ordered in the HTML.
+            const motorRows = document.querySelectorAll('.motor-controls .motor-row');
+            const configData = { motors: {} };
+            // Mouth
+            configData.motors.mouth = {
+                in1: parseInt(motorRows[0].querySelectorAll('input')[0].value),
+                in2: parseInt(motorRows[0].querySelectorAll('input')[1].value),
+                en:  parseInt(motorRows[0].querySelectorAll('input')[2].value),
+                forward_speed: parseInt(motorRows[1].querySelectorAll('input')[0].value),
+                reverse_speed: parseInt(motorRows[1].querySelectorAll('input')[1].value),
+                neutral_return_time: parseFloat(motorRows[1].querySelectorAll('input')[2].value),
+            };
+            // Tail
+            configData.motors.tail = {
+                in1: parseInt(motorRows[2].querySelectorAll('input')[0].value),
+                in2: parseInt(motorRows[2].querySelectorAll('input')[1].value),
+                en:  parseInt(motorRows[2].querySelectorAll('input')[2].value),
+                forward_speed: parseInt(motorRows[3].querySelectorAll('input')[0].value),
+                reverse_speed: parseInt(motorRows[3].querySelectorAll('input')[1].value),
+                neutral_return_time: parseFloat(motorRows[3].querySelectorAll('input')[2].value),
+            };
+            // Body
+            configData.motors.body = {
+                in1: parseInt(motorRows[4].querySelectorAll('input')[0].value),
+                in2: parseInt(motorRows[4].querySelectorAll('input')[1].value),
+                en:  parseInt(motorRows[4].querySelectorAll('input')[2].value),
+                forward_speed: parseInt(motorRows[5].querySelectorAll('input')[0].value),
+                reverse_speed: parseInt(motorRows[5].querySelectorAll('input')[1].value),
+                neutral_return_time: parseFloat(motorRows[5].querySelectorAll('input')[2].value),
+            };
+            updateSection('motion', configData);
+        });
 
-        const saveLlmBtn = $('save_llm');
-        if (saveLlmBtn) {
-            saveLlmBtn.addEventListener('click', function() {
-                updateSection('llm', {
-                    endpoint_url: $('llm_endpoint').value,
-                    model: $('llm_model').value,
-                    temperature: parseFloat($('llm_temperature').value),
-                    max_tokens: parseInt($('llm_max_tokens').value),
-                    disable_reasoning: $('disable_reasoning').checked,
-                }, 'llm_status');
-            });
-        }
+        // Open mouth action with overrides
+        openMouthBtn.addEventListener('click', function() {
+            const durVal = mouthDurationInput.value;
+            const spdVal = mouthSpeedInput.value;
+            const payload = {};
+            if (durVal) payload.duration = parseFloat(durVal);
+            if (spdVal) payload.speed = parseInt(spdVal);
+            fetch('/api/motor/open_mouth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.status) {
+                        showStatus(data.status);
+                    } else if (data.error) {
+                        showStatus('Error: ' + data.error, true);
+                    }
+                })
+                .catch(err => {
+                    showStatus('Error: ' + err, true);
+                });
+        });
 
-        const saveTtsBtn = $('save_tts');
-        if (saveTtsBtn) {
-            saveTtsBtn.addEventListener('click', function() {
-                updateSection('tts', {
-                    piper_binary: $('piper_binary').value,
-                    voices_dir: $('voices_dir').value,
-                    default_voice: $('default_voice').value,
-                    audio_device: $('tts_device').value,
-                    output_dir: $('tts_output').value,
-                }, 'tts_status');
-            });
-        }
+        // Wiggle action
+        wiggleBtn.addEventListener('click', function() {
+            const cycles = parseInt(wiggleCyclesInput.value) || 1;
+            fetch('/api/motor/wiggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cycles: cycles }),
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.status) {
+                        showStatus(data.status);
+                    } else if (data.error) {
+                        showStatus('Error: ' + data.error, true);
+                    }
+                })
+                .catch(err => {
+                    showStatus('Error: ' + err, true);
+                });
+        });
 
-        const saveMotionBtn = $('save_motion');
-        if (saveMotionBtn) {
-            saveMotionBtn.addEventListener('click', function() {
-                const rows = document.querySelectorAll('.motor-controls .motor-row');
-                const motionData = { motors: {} };
-                motionData.motors.mouth = {
-                    in1: parseInt(rows[0].querySelectorAll('input')[0].value),
-                    in2: parseInt(rows[0].querySelectorAll('input')[1].value),
-                    en: parseInt(rows[0].querySelectorAll('input')[2].value),
-                    forward_speed: parseInt(rows[1].querySelectorAll('input')[0].value),
-                    reverse_speed: parseInt(rows[1].querySelectorAll('input')[1].value),
-                    neutral_return_time: parseFloat(rows[1].querySelectorAll('input')[2].value),
-                };
-                motionData.motors.tail = {
-                    in1: parseInt(rows[2].querySelectorAll('input')[0].value),
-                    in2: parseInt(rows[2].querySelectorAll('input')[1].value),
-                    en: parseInt(rows[2].querySelectorAll('input')[2].value),
-                    forward_speed: parseInt(rows[3].querySelectorAll('input')[0].value),
-                    reverse_speed: parseInt(rows[3].querySelectorAll('input')[1].value),
-                    neutral_return_time: parseFloat(rows[3].querySelectorAll('input')[2].value),
-                };
-                motionData.motors.body = {
-                    in1: parseInt(rows[4].querySelectorAll('input')[0].value),
-                    in2: parseInt(rows[4].querySelectorAll('input')[1].value),
-                    en: parseInt(rows[4].querySelectorAll('input')[2].value),
-                    forward_speed: parseInt(rows[5].querySelectorAll('input')[0].value),
-                    reverse_speed: parseInt(rows[5].querySelectorAll('input')[1].value),
-                    neutral_return_time: parseFloat(rows[5].querySelectorAll('input')[2].value),
-                };
-                updateSection('motion', motionData, 'motion_status');
-            });
-        }
+        // Reset services
+        resetBtn.addEventListener('click', function() {
+            fetch('/api/services/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.status) {
+                        showStatus(data.status);
+                    } else if (data.error) {
+                        showStatus('Error: ' + data.error, true);
+                    }
+                })
+                .catch(err => {
+                    showStatus('Error: ' + err, true);
+                });
+        });
 
-        const openMouthBtn = $('open_mouth');
-        if (openMouthBtn) {
-            openMouthBtn.addEventListener('click', function() {
-                const duration = $('mouth_duration') ? parseFloat($('mouth_duration').value) : null;
-                const speed = $('mouth_speed') ? parseFloat($('mouth_speed').value) : null;
-                setStatus('motion_status', 'Opening mouth...');
-                postJson('/api/motor/open_mouth', { duration: duration, speed: speed })
-                    .then(data => setStatus('motion_status', data.status || 'Mouth command queued.', true))
-                    .catch(err => setStatus('motion_status', 'Mouth error: ' + err.message, false));
-            });
-        }
-
-        const wiggleBtn = $('wiggle_btn');
-        if (wiggleBtn) {
-            wiggleBtn.addEventListener('click', function() {
-                const cycles = parseInt($('wiggle_cycles').value) || 1;
-                setStatus('motion_status', 'Wiggling...');
-                postJson('/api/motor/wiggle', { cycles: cycles })
-                    .then(data => setStatus('motion_status', data.status || 'Wiggle command queued.', true))
-                    .catch(err => setStatus('motion_status', 'Wiggle error: ' + err.message, false));
-            });
-        }
-
-        const stopMotionBtn = $('stop_motion');
-        if (stopMotionBtn) {
-            stopMotionBtn.addEventListener('click', function() {
-                setStatus('motion_status', 'Stopping motion...');
-                postJson('/api/motor/stop', {})
-                    .then(data => setStatus('motion_status', data.status || 'Motion stopped.', true))
-                    .catch(err => setStatus('motion_status', 'Stop error: ' + err.message, false));
-            });
-        }
+        // Stop motion
+        stopBtn.addEventListener('click', function() {
+            fetch('/api/motor/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            })
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.status) {
+                        showStatus(data.status);
+                    } else if (data.error) {
+                        showStatus('Error: ' + data.error, true);
+                    }
+                })
+                .catch(err => {
+                    showStatus('Error: ' + err, true);
+                });
+        });
     });
     </script>
+    </main>
+</body>
+</html>

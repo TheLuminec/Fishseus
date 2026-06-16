@@ -1,0 +1,119 @@
+/*
+ * Styling for the Fishseus Control Panel.
+ *
+ * This file contains the CSS rules previously embedded in the
+ * HTML.  Keeping the styles separate improves readability and
+ * allows caching of the stylesheet by the browser.
+ */
+
+/* Reset some basic elements */
+* {
+    box-sizing: border-box;
+}
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f5f6fa;
+    color: #333;
+    margin: 0;
+    padding: 0;
+}
+header {
+    background: #343a40;
+    color: #fff;
+    padding: 20px 40px;
+    text-align: center;
+}
+nav {
+    background: #4c566a;
+    padding: 10px 40px;
+    display: flex;
+    flex-wrap: wrap;
+}
+nav a {
+    color: #ffffff;
+    margin-right: 20px;
+    text-decoration: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+nav a:hover {
+    background: #2e3440;
+}
+main {
+    padding: 20px 40px;
+}
+section {
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 30px;
+    padding: 20px;
+}
+section h2 {
+    color: #2c3e50;
+    margin-top: 0;
+}
+.form-group {
+    margin-bottom: 15px;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+.form-actions {
+    margin-top: 20px;
+}
+button {
+    background: #007bff;
+    color: #ffffff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+    transition: background 0.2s;
+}
+button:hover {
+    background: #0056b3;
+}
+.motor-controls input {
+    width: 80px;
+}
+.motor-controls .motor-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.motor-controls .motor-row label {
+    width: 110px;
+    margin-right: 10px;
+}
+.motor-controls .motor-row input {
+    margin-right: 6px;
+}
+/* Status message area */
+#status {
+    margin: 10px 0;
+    padding: 8px;
+    border-radius: 4px;
+    background: #e9ecef;
+    color: #333;
+    font-size: 14px;
+    display: none;
+}
