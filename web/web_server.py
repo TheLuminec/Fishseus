@@ -370,10 +370,9 @@ class ServiceManager:
             self.tts = None
 
     def shutdown_all(self) -> None:
-        with self.lock:
-            self.reset_assistant()
-            self.reset_motion()
-            self.reset_tts()
+        self.reset_assistant()
+        self.reset_motion()
+        self.reset_tts()
 
     def get_llm(self) -> Any:
         if LlmConfig is None or LlmService is None:
