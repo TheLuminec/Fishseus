@@ -37,8 +37,8 @@ from pathlib import Path
 # Location of the UI HTML file and the config file.  We use the
 # directory of this script as the base.
 ROOT_DIR = Path(__file__).resolve().parent
-UI_FILE = ROOT_DIR / "web" / "fishseus_ui.html"
-CONFIG_FILE = ROOT_DIR / "config" / "fish_config.json"
+UI_FILE = ROOT_DIR / "fishseus_ui.html"
+CONFIG_FILE = ROOT_DIR / "fish_config.json"
 
 # Import stubs for assistant and motion.  These provide simple
 # stand‑ins for the real services.  If the real modules are available
