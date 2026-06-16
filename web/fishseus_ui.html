@@ -3,487 +3,841 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fishseus Control Panel</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Fishseus — Control Panel</title>
+    <meta name="description" content="Configuration and control panel for the Fishseus animatronic fish assistant.">
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>">
 </head>
 <body>
-    <header>
-        <h1>Fishseus Control Panel</h1>
-    </header>
-    <nav>
-        <a href="#dashboard">Dashboard</a>
-        <a href="#audio">Audio</a>
-        <a href="#stt">STT</a>
-        <a href="#llm">LLM</a>
-        <a href="#tts">TTS</a>
-        <a href="#motion">Motion</a>
-        <a href="#personality">Personality</a>
-    </nav>
-        <!-- Status message area -->
-        <div id="status"></div>
-        <main>
-        <section id="dashboard">
-            <h2>Dashboard</h2>
-            <p>Welcome to your Fishseus configuration panel. Use the sections below to adjust settings for audio capture, speech recognition, language model configuration, text-to-speech, and motor control. You can also edit the assistant personality prompt.</p>
-        </section>
+
+<!-- Mobile header -->
+<div class="mobile-header">
+    <h1>🐟 Fishseus</h1>
+    <button class="hamburger" id="menu-toggle" aria-label="Menu">☰</button>
+</div>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app-layout">
+
+    <!-- ===== Sidebar ===== -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="logo-icon">🐟</div>
+                <h1>Fishseus</h1>
+            </div>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="nav-section-label">Overview</div>
+            <a class="nav-link active" data-section="dashboard">
+                <span class="nav-icon">📊</span> Dashboard
+            </a>
+            <a class="nav-link" data-section="chat">
+                <span class="nav-icon">💬</span> Chat
+            </a>
+
+            <div class="nav-section-label">Services</div>
+            <a class="nav-link" data-section="audio">
+                <span class="nav-icon">🎙️</span> Audio
+            </a>
+            <a class="nav-link" data-section="stt">
+                <span class="nav-icon">📝</span> Speech-to-Text
+            </a>
+            <a class="nav-link" data-section="llm">
+                <span class="nav-icon">🧠</span> Language Model
+            </a>
+            <a class="nav-link" data-section="tts">
+                <span class="nav-icon">🔊</span> Text-to-Speech
+            </a>
+
+            <div class="nav-section-label">Hardware</div>
+            <a class="nav-link" data-section="motion">
+                <span class="nav-icon">⚙️</span> Motion Control
+            </a>
+
+            <div class="nav-section-label">Identity</div>
+            <a class="nav-link" data-section="personality">
+                <span class="nav-icon">🎭</span> Personality
+            </a>
+        </nav>
+    </aside>
+
+    <!-- ===== Main Content ===== -->
+    <main class="main-content">
+
+        <!-- Dashboard -->
+        <div class="content-section active" id="sec-dashboard">
+            <div class="section-header">
+                <h2>Dashboard</h2>
+                <p>Overview of your Fishseus system. Service indicators update live on page load.</p>
+            </div>
+            <div class="status-grid" id="status-grid">
+                <div class="status-card" id="status-llm">
+                    <div class="status-label">Language Model</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+                <div class="status-card" id="status-assistant">
+                    <div class="status-label">Assistant</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+                <div class="status-card" id="status-motion">
+                    <div class="status-label">Motion</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+                <div class="status-card" id="status-tts">
+                    <div class="status-label">Text-to-Speech</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🐟</span> Welcome</div>
+                <p style="color: var(--text-secondary); font-size: 13px; line-height: 1.7;">
+                    Fishseus is a modular voice-assistant stack for a motorized Billy Bass fish.
+                    Use the sidebar to configure audio capture, speech recognition, LLM, TTS, motor control,
+                    and the fish personality prompt. Chat lets you talk to Fishseus directly from the browser.
+                </p>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" id="btn-refresh-status">↻ Refresh Status</button>
+                <button class="btn btn-danger" id="btn-reset-services">⟳ Reset All Services</button>
+            </div>
+        </div>
+
+        <!-- Chat -->
+        <div class="content-section" id="sec-chat">
+            <div class="section-header">
+                <h2>Chat with Fishseus</h2>
+                <p>Send a message and get a response from your fish assistant.</p>
+            </div>
+            <div class="chat-container" id="chat-container">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-empty">Say something to Fishseus…</div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Type a message…" autocomplete="off">
+                    <button class="btn btn-primary" id="chat-send">Send</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Audio Settings -->
-        <section id="audio">
-            <h2>Audio Settings</h2>
-            <div class="form-group">
-                <label for="audio_device">Input Device</label>
-                <input type="text" id="audio_device" value="plughw:3,0">
+        <div class="content-section" id="sec-audio">
+            <div class="section-header">
+                <h2>Audio Settings</h2>
+                <p>Configure microphone input device and recording parameters.</p>
             </div>
-            <div class="form-group">
-                <label for="sample_rate">Sample Rate (Hz)</label>
-                <input type="number" id="sample_rate" value="16000">
+            <div class="card">
+                <div class="form-group">
+                    <label for="audio_device">Input Device</label>
+                    <input type="text" id="audio_device">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio_sample_rate">Sample Rate (Hz)</label>
+                        <input type="number" id="audio_sample_rate">
+                    </div>
+                    <div class="form-group">
+                        <label for="audio_channels">Channels</label>
+                        <input type="number" id="audio_channels" min="1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio_speech_threshold">Speech Threshold</label>
+                        <input type="number" id="audio_speech_threshold" step="0.0001">
+                    </div>
+                    <div class="form-group">
+                        <label for="audio_silence_threshold">Silence Threshold</label>
+                        <input type="number" id="audio_silence_threshold" step="0.0001">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio_silence_timeout_s">Silence Timeout (s)</label>
+                        <input type="number" id="audio_silence_timeout_s" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="audio_max_record_seconds">Max Record (s)</label>
+                        <input type="number" id="audio_max_record_seconds" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="audio_pre_roll_seconds">Pre-roll (s)</label>
+                        <input type="number" id="audio_pre_roll_seconds" step="0.1">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-audio">Save Audio Settings</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="channels">Channels</label>
-                <input type="number" id="channels" value="1" min="1">
-            </div>
-            <div class="form-group">
-                <label for="speech_threshold">Speech Threshold</label>
-                <input type="number" id="speech_threshold" value="0.003" step="0.0001">
-            </div>
-            <div class="form-group">
-                <label for="silence_threshold">Silence Threshold</label>
-                <input type="number" id="silence_threshold" value="0.0008" step="0.0001">
-            </div>
-            <div class="form-group">
-                <label for="silence_timeout">Silence Timeout (s)</label>
-                <input type="number" id="silence_timeout" value="1.0" step="0.1">
-            </div>
-            <div class="form-group">
-                <label for="max_record">Max Record (s)</label>
-                <input type="number" id="max_record" value="12.0" step="0.1">
-            </div>
-            <div class="form-group">
-                <label for="pre_roll">Pre-roll (s)</label>
-                <input type="number" id="pre_roll" value="0.4" step="0.1">
-            </div>
-            <div class="form-actions">
-                <button id="save_audio">Save Audio Settings</button>
-            </div>
-        </section>
+        </div>
 
         <!-- STT Settings -->
-        <section id="stt">
-            <h2>STT Settings</h2>
-            <div class="form-group">
-                <label for="whisper_binary">Whisper Binary Path</label>
-                <input type="text" id="whisper_binary" value="../stt/whisper.cpp/build/bin/whisper-cli">
+        <div class="content-section" id="sec-stt">
+            <div class="section-header">
+                <h2>Speech-to-Text</h2>
+                <p>Configure whisper.cpp binary, model, and wake-word detection.</p>
             </div>
-            <div class="form-group">
-                <label for="whisper_model">Whisper Model</label>
-                <input type="text" id="whisper_model" value="../stt/whisper.cpp/models/ggml-base.en.bin">
+            <div class="card">
+                <div class="form-group">
+                    <label for="stt_whisper_binary">Whisper Binary Path</label>
+                    <input type="text" id="stt_whisper_binary">
+                </div>
+                <div class="form-group">
+                    <label for="stt_model_path">Model Path</label>
+                    <input type="text" id="stt_model_path">
+                </div>
+                <div class="form-group">
+                    <label for="stt_threads">Threads</label>
+                    <input type="number" id="stt_threads" min="1" style="max-width: 120px;">
+                </div>
+                <div class="form-group">
+                    <label for="stt_wake_words">Wake Words (comma-separated)</label>
+                    <input type="text" id="stt_wake_words">
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-stt">Save STT Settings</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="whisper_threads">Threads</label>
-                <input type="number" id="whisper_threads" value="4" min="1">
-            </div>
-            <div class="form-group">
-                <label for="wake_words">Wake Words (comma-separated)</label>
-                <input type="text" id="wake_words" value="fish, fishseus, hey fish">
-            </div>
-            <div class="form-actions">
-                <button id="save_stt">Save STT Settings</button>
-            </div>
-        </section>
+        </div>
 
         <!-- LLM Settings -->
-        <section id="llm">
-            <h2>LLM Settings</h2>
-            <div class="form-group">
-                <label for="llm_endpoint">Endpoint URL</label>
-                <input type="text" id="llm_endpoint" value="http://ollama.angelfish-gamma.ts.net/v1/chat/completions">
+        <div class="content-section" id="sec-llm">
+            <div class="section-header">
+                <h2>Language Model</h2>
+                <p>Configure the remote LLM endpoint (Ollama / OpenAI-compatible).</p>
             </div>
-            <div class="form-group">
-                <label for="llm_model">Model</label>
-                <input type="text" id="llm_model" value="qwen2.5:3b">
+            <div class="card">
+                <div class="form-group">
+                    <label for="llm_endpoint_url">Endpoint URL</label>
+                    <input type="url" id="llm_endpoint_url">
+                </div>
+                <div class="form-group">
+                    <label for="llm_model">Model</label>
+                    <input type="text" id="llm_model">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="llm_temperature">Temperature</label>
+                        <input type="number" id="llm_temperature" step="0.1" min="0" max="2">
+                    </div>
+                    <div class="form-group">
+                        <label for="llm_max_tokens">Max Tokens</label>
+                        <input type="number" id="llm_max_tokens" min="50">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="llm_disable_reasoning">
+                        Disable Reasoning / Thinking
+                    </label>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-llm">Save LLM Settings</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="llm_temperature">Temperature</label>
-                <input type="number" id="llm_temperature" value="0.7" step="0.1" min="0" max="2">
-            </div>
-            <div class="form-group">
-                <label for="llm_max_tokens">Max Tokens</label>
-                <input type="number" id="llm_max_tokens" value="512" min="50">
-            </div>
-            <div class="form-group">
-                <label><input type="checkbox" id="disable_reasoning" checked> Disable Reasoning</label>
-            </div>
-            <div class="form-actions">
-                <button id="save_llm">Save LLM Settings</button>
-            </div>
-        </section>
+        </div>
 
         <!-- TTS Settings -->
-        <section id="tts">
-            <h2>TTS Settings</h2>
-            <div class="form-group">
-                <label for="piper_binary">Piper Binary Path</label>
-                <input type="text" id="piper_binary" value="../tts/.venv/bin/piper">
+        <div class="content-section" id="sec-tts">
+            <div class="section-header">
+                <h2>Text-to-Speech</h2>
+                <p>Configure the Piper TTS engine, voice, and playback device.</p>
             </div>
-            <div class="form-group">
-                <label for="voices_dir">Voices Directory</label>
-                <input type="text" id="voices_dir" value="../tts/voices">
-            </div>
-            <div class="form-group">
-                <label for="default_voice">Default Voice</label>
-                <input type="text" id="default_voice" value="en_US-arctic-medium">
-            </div>
-            <div class="form-group">
-                <label for="tts_device">Playback Device</label>
-                <input type="text" id="tts_device" value="plughw:0,0">
-            </div>
-            <div class="form-group">
-                <label for="tts_output">Output Directory</label>
-                <input type="text" id="tts_output" value="../tmp/tts">
-            </div>
-            <div class="form-actions">
-                <button id="save_tts">Save TTS Settings</button>
-            </div>
-        </section>
-
-        <!-- Motion Settings -->
-        <section id="motion">
-            <h2>Motion Control</h2>
-            <p>Edit motor pin assignments and speeds. Use the controls below to test motions.</p>
-            <div class="motor-controls">
-                <div class="motor-row">
-                    <label>Mouth Pins:</label>
-                    IN1 <input type="number" value="17" min="0"> IN2 <input type="number" value="27" min="0"> EN <input type="number" value="22" min="0">
+            <div class="card">
+                <div class="form-group">
+                    <label for="tts_piper_binary">Piper Binary Path</label>
+                    <input type="text" id="tts_piper_binary">
                 </div>
-                <div class="motor-row">
-                    <label>Mouth Speeds:</label>
-                    Forward <input type="number" value="82" min="0" max="100"> Reverse <input type="number" value="55" min="0" max="100"> Return <input type="number" value="0.04" step="0.01">
+                <div class="form-group">
+                    <label for="tts_voices_dir">Voices Directory</label>
+                    <input type="text" id="tts_voices_dir">
                 </div>
-                <div class="motor-row">
-                    <label>Tail Pins:</label>
-                    IN1 <input type="number" value="23" min="0"> IN2 <input type="number" value="24" min="0"> EN <input type="number" value="25" min="0">
+                <div class="form-group">
+                    <label for="tts_default_voice">Default Voice</label>
+                    <input type="text" id="tts_default_voice">
                 </div>
-                <div class="motor-row">
-                    <label>Tail Speeds:</label>
-                    Forward <input type="number" value="72" min="0" max="100"> Reverse <input type="number" value="48" min="0" max="100"> Return <input type="number" value="0.03" step="0.01">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="tts_audio_device">Playback Device</label>
+                        <input type="text" id="tts_audio_device">
+                    </div>
+                    <div class="form-group">
+                        <label for="tts_output_dir">Output Directory</label>
+                        <input type="text" id="tts_output_dir">
+                    </div>
                 </div>
-                <div class="motor-row">
-                    <label>Body Pins:</label>
-                    IN1 <input type="number" value="5" min="0"> IN2 <input type="number" value="6" min="0"> EN <input type="number" value="12" min="0">
-                </div>
-                <div class="motor-row">
-                    <label>Body Speeds:</label>
-                    Forward <input type="number" value="68" min="0" max="100"> Reverse <input type="number" value="45" min="0" max="100"> Return <input type="number" value="0.03" step="0.01">
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-tts">Save TTS Settings</button>
                 </div>
             </div>
-            <div class="form-actions">
-                <button id="save_motion">Save Motor Settings</button>
-                <!-- Mouth test controls -->
-                <label for="mouth_duration">Duration (s)</label>
-                <input type="number" id="mouth_duration" value="0.09" step="0.01" style="width:80px;" min="0.01">
-                <label for="mouth_speed">Speed</label>
-                <input type="number" id="mouth_speed" value="82" step="1" min="0" max="100" style="width:60px;">
-                <button id="open_mouth">Open Mouth</button>
-                <button id="wiggle_btn">Wiggle</button>
-                <input type="number" id="wiggle_cycles" value="2" min="1" max="5" style="width:60px;"> cycles
-                <button id="reset_services">Reset Services</button>
-                <button id="stop_motion">Stop Motion</button>
+        </div>
+
+        <!-- Motion Control -->
+        <div class="content-section" id="sec-motion">
+            <div class="section-header">
+                <h2>Motion Control</h2>
+                <p>Configure motor pin assignments, speeds, and test fish motions.</p>
             </div>
-        </section>
 
-        <!-- Personality Editor -->
-        <section id="personality">
-            <h2>Personality Prompt</h2>
-            <div class="form-group">
-                <label for="personality_text">Personality Prompt</label>
-                <textarea id="personality_text" rows="10">You are Fishseus, a dramatic animatronic fish oracle.
-
-You are witty, strange, sarcastic, and helpful.
-You speak like a washed-up sea prophet trapped in a novelty wall fish.
-Keep responses short because they are spoken aloud.
-Prefer 1-3 sentences.
-
-You must respond ONLY as valid JSON with this exact shape:
-{
-  "speak": "short text to say aloud",
-  "motion": "idle | speaking | happy | annoyed | thinking | excited",
-  "tool_calls": [],
-  "memory_updates": []
-}
-
-Rules:
-- The "speak" field must always be present and non-empty.
-- Use "tool_calls" only when useful.
-- Use "memory_updates" only when the user explicitly asks you to remember something.
-- Keep JSON valid. No markdown. No code fences.</textarea>
+            <!-- Motor config cards -->
+            <div class="motor-grid">
+                <div class="motor-card" data-motor="mouth">
+                    <h4>🫦 Mouth Motor</h4>
+                    <div class="motor-fields">
+                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
+                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
+                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
+                    </div>
+                </div>
+                <div class="motor-card" data-motor="tail">
+                    <h4>🐠 Tail Motor</h4>
+                    <div class="motor-fields">
+                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
+                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
+                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
+                    </div>
+                </div>
+                <div class="motor-card" data-motor="body">
+                    <h4>🐟 Body Motor</h4>
+                    <div class="motor-fields">
+                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
+                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
+                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
+                        <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
+                    </div>
+                </div>
             </div>
-            <div class="form-actions">
-                <button>Save Personality Prompt</button>
-            </div>
-        </section>
 
-        <!-- Talk Section -->
-        <section id="talk">
-            <h2>Talk to Fish</h2>
-            <p>Type a message below and send it to your assistant.  The response will appear below.</p>
-            <div class="form-group">
-                <label for="talk_input">Your Message</label>
-                <input type="text" id="talk_input" placeholder="Say something to Fish...">
+            <!-- General motion timing -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">⏱️</span> Timing Parameters</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="motion_pwm_frequency">PWM Frequency (Hz)</label>
+                        <input type="number" id="motion_pwm_frequency" min="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="motion_body_wiggle_time">Body Wiggle Time (s)</label>
+                        <input type="number" id="motion_body_wiggle_time" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="motion_tail_wiggle_time">Tail Wiggle Time (s)</label>
+                        <input type="number" id="motion_tail_wiggle_time" step="0.01">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="motion_mouth_open_time">Mouth Open Time (s)</label>
+                        <input type="number" id="motion_mouth_open_time" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="motion_mouth_close_time">Mouth Close Time (s)</label>
+                        <input type="number" id="motion_mouth_close_time" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="motion_envelope_window_s">Envelope Window (s)</label>
+                        <input type="number" id="motion_envelope_window_s" step="0.01">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-motion">Save Motor Settings</button>
+                </div>
             </div>
-            <button id="talk_send">Send</button>
-            <div id="talk_output" style="margin-top: 10px; font-weight: bold; min-height: 20px;"></div>
-        </section>
+
+            <!-- Motor test controls -->
+            <div class="motor-test-panel">
+                <h3>🎮 Test Controls</h3>
+                <div class="test-controls">
+                    <div class="test-field">
+                        <label>Duration (s)</label>
+                        <input type="number" id="test-mouth-duration" value="0.09" step="0.01" min="0.01">
+                    </div>
+                    <div class="test-field">
+                        <label>Speed</label>
+                        <input type="number" id="test-mouth-speed" value="82" min="0" max="100">
+                    </div>
+                    <button class="btn btn-secondary btn-sm motor-btn" id="btn-open-mouth">Open Mouth</button>
+
+                    <div class="test-field">
+                        <label>Cycles</label>
+                        <input type="number" id="test-wiggle-cycles" value="2" min="1" max="5">
+                    </div>
+                    <button class="btn btn-secondary btn-sm motor-btn" id="btn-wiggle">Wiggle</button>
+
+                    <div class="test-field">
+                        <label>Speak (s)</label>
+                        <input type="number" id="test-speak-duration" value="2.0" step="0.5" min="0.5">
+                    </div>
+                    <button class="btn btn-secondary btn-sm motor-btn" id="btn-speak-placeholder">Speak Test</button>
+
+                    <button class="btn btn-danger btn-sm motor-btn" id="btn-stop-motion">⏹ Stop All</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Personality -->
+        <div class="content-section" id="sec-personality">
+            <div class="section-header">
+                <h2>Personality</h2>
+                <p>Edit the system prompt that defines Fishseus's character and behavior.</p>
+            </div>
+            <div class="card">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="assistant_name">Assistant Name</label>
+                        <input type="text" id="assistant_name">
+                    </div>
+                    <div class="form-group">
+                        <label for="user_name">Your Name</label>
+                        <input type="text" id="user_name">
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-top: 0; margin-bottom: 16px;">
+                    <button class="btn btn-primary btn-sm" id="save-assistant-names">Save Names</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📜</span> System Prompt</div>
+                <div class="form-group">
+                    <textarea id="personality_text" rows="14" style="min-height: 240px;"></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-personality">Save Personality Prompt</button>
+                </div>
+            </div>
+        </div>
+
     </main>
-    <!-- Talk script -->
-    <script>
-    // Simple talk feature and configuration UI handlers
-    document.addEventListener('DOMContentLoaded', function() {
-        // Elements
-        const sendBtn = document.getElementById('talk_send');
-        const inputField = document.getElementById('talk_input');
-        const outputDiv = document.getElementById('talk_output');
-        const saveAudioBtn = document.getElementById('save_audio');
-        const saveSttBtn = document.getElementById('save_stt');
-        const saveLlmBtn = document.getElementById('save_llm');
-        const saveTtsBtn = document.getElementById('save_tts');
-        const saveMotionBtn = document.getElementById('save_motion');
-        const openMouthBtn = document.getElementById('open_mouth');
-        const wiggleBtn = document.getElementById('wiggle_btn');
-        const wiggleCyclesInput = document.getElementById('wiggle_cycles');
-        const mouthDurationInput = document.getElementById('mouth_duration');
-        const mouthSpeedInput = document.getElementById('mouth_speed');
-        const resetBtn = document.getElementById('reset_services');
-        const stopBtn = document.getElementById('stop_motion');
-        const statusDiv = document.getElementById('status');
+</div>
 
-        // Utility to show a status message
-        function showStatus(msg, isError = false) {
-            statusDiv.innerText = msg;
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = isError ? '#f8d7da' : '#e2e3e5';
-            statusDiv.style.color = isError ? '#721c24' : '#155724';
-            // Hide after a few seconds
-            setTimeout(() => {
-                statusDiv.style.display = 'none';
-            }, 3000);
-        }
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
 
-        // Utility to update a config section
-        function updateSection(sectionName, data) {
-            fetch('/api/' + sectionName, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data.status) {
-                        showStatus('Saved ' + sectionName + ' settings.');
-                    } else if (data.error) {
-                        showStatus('Error saving ' + sectionName + ': ' + data.error, true);
-                    } else {
-                        showStatus('Saved ' + sectionName + ' settings.');
-                    }
-                })
-                .catch(err => {
-                    showStatus('Error saving ' + sectionName + ': ' + err, true);
-                });
-        }
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // =====================================================================
+    // State
+    // =====================================================================
+    const chatHistory = [];
 
-        // Talk handler
-        sendBtn.addEventListener('click', function() {
-            const message = inputField.value.trim();
-            if (!message) {
-                outputDiv.innerText = 'Please enter a message.';
-                return;
+    // =====================================================================
+    // Utilities
+    // =====================================================================
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function showToast(msg, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = 'toast ' + type;
+        toast.textContent = msg;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.classList.add('hide');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    async function api(method, path, body) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body !== undefined) opts.body = JSON.stringify(body);
+        const resp = await fetch(path, opts);
+        return resp.json();
+    }
+
+    function setVal(id, val) {
+        const el = document.getElementById(id);
+        if (!el || val === undefined || val === null) return;
+        if (el.type === 'checkbox') el.checked = !!val;
+        else el.value = val;
+    }
+
+    function getVal(id, type) {
+        const el = document.getElementById(id);
+        if (!el) return undefined;
+        if (el.type === 'checkbox') return el.checked;
+        if (type === 'int') return parseInt(el.value, 10);
+        if (type === 'float') return parseFloat(el.value);
+        return el.value;
+    }
+
+    // =====================================================================
+    // Navigation
+    // =====================================================================
+    const navLinks = document.querySelectorAll('.nav-link[data-section]');
+    const sections = document.querySelectorAll('.content-section');
+
+    function switchSection(id) {
+        sections.forEach(s => s.classList.remove('active'));
+        navLinks.forEach(l => l.classList.remove('active'));
+        const sec = document.getElementById('sec-' + id);
+        if (sec) sec.classList.add('active');
+        navLinks.forEach(l => { if (l.dataset.section === id) l.classList.add('active'); });
+        // Close mobile sidebar
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebar-overlay').classList.remove('visible');
+    }
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', () => switchSection(link.dataset.section));
+    });
+
+    // Mobile menu
+    document.getElementById('menu-toggle').addEventListener('click', () => {
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('sidebar-overlay').classList.toggle('visible');
+    });
+    document.getElementById('sidebar-overlay').addEventListener('click', () => {
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebar-overlay').classList.remove('visible');
+    });
+
+    // =====================================================================
+    // Status
+    // =====================================================================
+    async function loadStatus() {
+        try {
+            const data = await api('GET', '/api/status');
+            const services = data.services || {};
+            for (const [name, status] of Object.entries(services)) {
+                const card = document.getElementById('status-' + name);
+                if (!card) continue;
+                const dot = card.querySelector('.status-dot');
+                const text = card.querySelector('.status-text');
+                dot.className = 'status-dot ' + (status === 'ready' ? 'ready' : 'unavailable');
+                text.textContent = status === 'ready' ? 'Ready' : 'Unavailable';
             }
-            outputDiv.innerText = 'Thinking...';
-            fetch('/api/talk', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: message })
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    outputDiv.innerText = data.reply || 'No response.';
-                })
-                .catch(err => {
-                    outputDiv.innerText = 'Error: ' + err;
+            // Disable motor buttons if motion unavailable
+            const motionReady = services.motion === 'ready';
+            document.querySelectorAll('.motor-btn').forEach(b => b.disabled = !motionReady);
+            // Disable chat send if assistant unavailable
+            const assistantReady = services.assistant === 'ready';
+            const chatSend = document.getElementById('chat-send');
+            if (chatSend && !assistantReady) chatSend.disabled = true;
+        } catch (e) {
+            showToast('Failed to load service status', 'error');
+        }
+    }
+
+    // =====================================================================
+    // Config Load
+    // =====================================================================
+    async function loadConfig() {
+        try {
+            const c = await api('GET', '/api/config');
+
+            // Audio
+            const a = c.audio || {};
+            setVal('audio_device', a.device);
+            setVal('audio_sample_rate', a.sample_rate);
+            setVal('audio_channels', a.channels);
+            setVal('audio_speech_threshold', a.speech_threshold);
+            setVal('audio_silence_threshold', a.silence_threshold);
+            setVal('audio_silence_timeout_s', a.silence_timeout_s);
+            setVal('audio_max_record_seconds', a.max_record_seconds);
+            setVal('audio_pre_roll_seconds', a.pre_roll_seconds);
+
+            // STT
+            const s = c.stt || {};
+            setVal('stt_whisper_binary', s.whisper_binary);
+            setVal('stt_model_path', s.model_path);
+            setVal('stt_threads', s.threads);
+            setVal('stt_wake_words', Array.isArray(s.wake_words) ? s.wake_words.join(', ') : s.wake_words);
+
+            // LLM
+            const l = c.llm || {};
+            setVal('llm_endpoint_url', l.endpoint_url);
+            setVal('llm_model', l.model);
+            setVal('llm_temperature', l.temperature);
+            setVal('llm_max_tokens', l.max_tokens);
+            setVal('llm_disable_reasoning', l.disable_reasoning);
+
+            // TTS
+            const t = c.tts || {};
+            setVal('tts_piper_binary', t.piper_binary);
+            setVal('tts_voices_dir', t.voices_dir);
+            setVal('tts_default_voice', t.default_voice);
+            setVal('tts_audio_device', t.audio_device);
+            setVal('tts_output_dir', t.output_dir);
+
+            // Motion — timing
+            const m = c.motion || {};
+            setVal('motion_pwm_frequency', m.pwm_frequency);
+            setVal('motion_body_wiggle_time', m.body_wiggle_time);
+            setVal('motion_tail_wiggle_time', m.tail_wiggle_time);
+            setVal('motion_mouth_open_time', m.mouth_open_time);
+            setVal('motion_mouth_close_time', m.mouth_close_time);
+            setVal('motion_envelope_window_s', m.envelope_window_s);
+
+            // Motion — per-motor configs
+            const motors = m.motors || {};
+            document.querySelectorAll('.motor-card').forEach(card => {
+                const motorName = card.dataset.motor;
+                const mcfg = motors[motorName] || {};
+                card.querySelectorAll('.motor-field input').forEach(inp => {
+                    const key = inp.dataset.key;
+                    if (key && mcfg[key] !== undefined) inp.value = mcfg[key];
                 });
-        });
+            });
 
-        // Audio save
-        saveAudioBtn.addEventListener('click', function() {
-            const audioData = {
-                device: document.getElementById('audio_device').value,
-                sample_rate: parseInt(document.getElementById('sample_rate').value),
-                channels: parseInt(document.getElementById('channels').value),
-                speech_threshold: parseFloat(document.getElementById('speech_threshold').value),
-                silence_threshold: parseFloat(document.getElementById('silence_threshold').value),
-                silence_timeout_s: parseFloat(document.getElementById('silence_timeout').value),
-                max_record_seconds: parseFloat(document.getElementById('max_record').value),
-                pre_roll_seconds: parseFloat(document.getElementById('pre_roll').value),
-            };
-            updateSection('audio', audioData);
-        });
+            // Assistant names
+            const as = c.assistant || {};
+            setVal('assistant_name', as.assistant_name || 'Fishseus');
+            setVal('user_name', as.user_name || 'User');
 
-        // STT save
-        saveSttBtn.addEventListener('click', function() {
-            const sttData = {
-                whisper_binary: document.getElementById('whisper_binary').value,
-                model_path: document.getElementById('whisper_model').value,
-                threads: parseInt(document.getElementById('whisper_threads').value),
-                wake_words: document.getElementById('wake_words').value.split(',').map(s => s.trim()).filter(Boolean),
-            };
-            updateSection('stt', sttData);
-        });
+        } catch (e) {
+            showToast('Failed to load configuration', 'error');
+        }
+    }
 
-        // LLM save
-        saveLlmBtn.addEventListener('click', function() {
-            const llmData = {
-                endpoint_url: document.getElementById('llm_endpoint').value,
-                model: document.getElementById('llm_model').value,
-                temperature: parseFloat(document.getElementById('llm_temperature').value),
-                max_tokens: parseInt(document.getElementById('llm_max_tokens').value),
-                disable_reasoning: document.getElementById('disable_reasoning').checked,
-            };
-            updateSection('llm', llmData);
-        });
+    async function loadPersonality() {
+        try {
+            const data = await api('GET', '/api/personality');
+            setVal('personality_text', data.text || '');
+        } catch (e) {
+            // Not critical
+        }
+    }
 
-        // TTS save
-        saveTtsBtn.addEventListener('click', function() {
-            const ttsData = {
-                piper_binary: document.getElementById('piper_binary').value,
-                voices_dir: document.getElementById('voices_dir').value,
-                default_voice: document.getElementById('default_voice').value,
-                audio_device: document.getElementById('tts_device').value,
-                output_dir: document.getElementById('tts_output').value,
-            };
-            updateSection('tts', ttsData);
-        });
+    // =====================================================================
+    // Config Save Helpers
+    // =====================================================================
+    async function saveSection(section, data) {
+        try {
+            const resp = await api('POST', '/api/' + section, data);
+            if (resp.status) showToast('Saved ' + section + ' settings');
+            else if (resp.error) showToast(resp.error, 'error');
+        } catch (e) {
+            showToast('Failed to save ' + section, 'error');
+        }
+    }
 
-        // Motion save
-        saveMotionBtn.addEventListener('click', function() {
-            // Collect motor settings from the inputs.  They are ordered in the HTML.
-            const motorRows = document.querySelectorAll('.motor-controls .motor-row');
-            const configData = { motors: {} };
-            // Mouth
-            configData.motors.mouth = {
-                in1: parseInt(motorRows[0].querySelectorAll('input')[0].value),
-                in2: parseInt(motorRows[0].querySelectorAll('input')[1].value),
-                en:  parseInt(motorRows[0].querySelectorAll('input')[2].value),
-                forward_speed: parseInt(motorRows[1].querySelectorAll('input')[0].value),
-                reverse_speed: parseInt(motorRows[1].querySelectorAll('input')[1].value),
-                neutral_return_time: parseFloat(motorRows[1].querySelectorAll('input')[2].value),
-            };
-            // Tail
-            configData.motors.tail = {
-                in1: parseInt(motorRows[2].querySelectorAll('input')[0].value),
-                in2: parseInt(motorRows[2].querySelectorAll('input')[1].value),
-                en:  parseInt(motorRows[2].querySelectorAll('input')[2].value),
-                forward_speed: parseInt(motorRows[3].querySelectorAll('input')[0].value),
-                reverse_speed: parseInt(motorRows[3].querySelectorAll('input')[1].value),
-                neutral_return_time: parseFloat(motorRows[3].querySelectorAll('input')[2].value),
-            };
-            // Body
-            configData.motors.body = {
-                in1: parseInt(motorRows[4].querySelectorAll('input')[0].value),
-                in2: parseInt(motorRows[4].querySelectorAll('input')[1].value),
-                en:  parseInt(motorRows[4].querySelectorAll('input')[2].value),
-                forward_speed: parseInt(motorRows[5].querySelectorAll('input')[0].value),
-                reverse_speed: parseInt(motorRows[5].querySelectorAll('input')[1].value),
-                neutral_return_time: parseFloat(motorRows[5].querySelectorAll('input')[2].value),
-            };
-            updateSection('motion', configData);
-        });
-
-        // Open mouth action with overrides
-        openMouthBtn.addEventListener('click', function() {
-            const durVal = mouthDurationInput.value;
-            const spdVal = mouthSpeedInput.value;
-            const payload = {};
-            if (durVal) payload.duration = parseFloat(durVal);
-            if (spdVal) payload.speed = parseInt(spdVal);
-            fetch('/api/motor/open_mouth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data.status) {
-                        showStatus(data.status);
-                    } else if (data.error) {
-                        showStatus('Error: ' + data.error, true);
-                    }
-                })
-                .catch(err => {
-                    showStatus('Error: ' + err, true);
-                });
-        });
-
-        // Wiggle action
-        wiggleBtn.addEventListener('click', function() {
-            const cycles = parseInt(wiggleCyclesInput.value) || 1;
-            fetch('/api/motor/wiggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cycles: cycles }),
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data.status) {
-                        showStatus(data.status);
-                    } else if (data.error) {
-                        showStatus('Error: ' + data.error, true);
-                    }
-                })
-                .catch(err => {
-                    showStatus('Error: ' + err, true);
-                });
-        });
-
-        // Reset services
-        resetBtn.addEventListener('click', function() {
-            fetch('/api/services/reset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data.status) {
-                        showStatus(data.status);
-                    } else if (data.error) {
-                        showStatus('Error: ' + data.error, true);
-                    }
-                })
-                .catch(err => {
-                    showStatus('Error: ' + err, true);
-                });
-        });
-
-        // Stop motion
-        stopBtn.addEventListener('click', function() {
-            fetch('/api/motor/stop', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-            })
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data.status) {
-                        showStatus(data.status);
-                    } else if (data.error) {
-                        showStatus('Error: ' + data.error, true);
-                    }
-                })
-                .catch(err => {
-                    showStatus('Error: ' + err, true);
-                });
+    // Audio
+    document.getElementById('save-audio').addEventListener('click', () => {
+        saveSection('audio', {
+            device: getVal('audio_device'),
+            sample_rate: getVal('audio_sample_rate', 'int'),
+            channels: getVal('audio_channels', 'int'),
+            speech_threshold: getVal('audio_speech_threshold', 'float'),
+            silence_threshold: getVal('audio_silence_threshold', 'float'),
+            silence_timeout_s: getVal('audio_silence_timeout_s', 'float'),
+            max_record_seconds: getVal('audio_max_record_seconds', 'float'),
+            pre_roll_seconds: getVal('audio_pre_roll_seconds', 'float'),
         });
     });
-    </script>
-    </main>
+
+    // STT
+    document.getElementById('save-stt').addEventListener('click', () => {
+        const raw = getVal('stt_wake_words') || '';
+        saveSection('stt', {
+            whisper_binary: getVal('stt_whisper_binary'),
+            model_path: getVal('stt_model_path'),
+            threads: getVal('stt_threads', 'int'),
+            wake_words: raw.split(',').map(s => s.trim()).filter(Boolean),
+        });
+    });
+
+    // LLM
+    document.getElementById('save-llm').addEventListener('click', () => {
+        saveSection('llm', {
+            endpoint_url: getVal('llm_endpoint_url'),
+            model: getVal('llm_model'),
+            temperature: getVal('llm_temperature', 'float'),
+            max_tokens: getVal('llm_max_tokens', 'int'),
+            disable_reasoning: getVal('llm_disable_reasoning'),
+        });
+    });
+
+    // TTS
+    document.getElementById('save-tts').addEventListener('click', () => {
+        saveSection('tts', {
+            piper_binary: getVal('tts_piper_binary'),
+            voices_dir: getVal('tts_voices_dir'),
+            default_voice: getVal('tts_default_voice'),
+            audio_device: getVal('tts_audio_device'),
+            output_dir: getVal('tts_output_dir'),
+        });
+    });
+
+    // Motion
+    document.getElementById('save-motion').addEventListener('click', () => {
+        const motors = {};
+        document.querySelectorAll('.motor-card').forEach(card => {
+            const name = card.dataset.motor;
+            const m = {};
+            card.querySelectorAll('.motor-field input').forEach(inp => {
+                const key = inp.dataset.key;
+                m[key] = key === 'neutral_return_time' ? parseFloat(inp.value) : parseInt(inp.value, 10);
+            });
+            motors[name] = m;
+        });
+        saveSection('motion', {
+            pwm_frequency: getVal('motion_pwm_frequency', 'int'),
+            body_wiggle_time: getVal('motion_body_wiggle_time', 'float'),
+            tail_wiggle_time: getVal('motion_tail_wiggle_time', 'float'),
+            mouth_open_time: getVal('motion_mouth_open_time', 'float'),
+            mouth_close_time: getVal('motion_mouth_close_time', 'float'),
+            envelope_window_s: getVal('motion_envelope_window_s', 'float'),
+            motors: motors,
+        });
+    });
+
+    // Assistant names
+    document.getElementById('save-assistant-names').addEventListener('click', () => {
+        saveSection('assistant', {
+            assistant_name: getVal('assistant_name'),
+            user_name: getVal('user_name'),
+        });
+    });
+
+    // Personality prompt (separate file endpoint)
+    document.getElementById('save-personality').addEventListener('click', async () => {
+        try {
+            const resp = await api('POST', '/api/personality', { text: getVal('personality_text') });
+            if (resp.status) showToast('Personality prompt saved');
+            else if (resp.error) showToast(resp.error, 'error');
+        } catch (e) {
+            showToast('Failed to save personality', 'error');
+        }
+    });
+
+    // =====================================================================
+    // Chat
+    // =====================================================================
+    const chatMessagesEl = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const chatSendBtn = document.getElementById('chat-send');
+
+    function renderChat() {
+        if (chatHistory.length === 0) {
+            chatMessagesEl.innerHTML = '<div class="chat-empty">Say something to Fishseus…</div>';
+            return;
+        }
+        chatMessagesEl.innerHTML = chatHistory.map(msg =>
+            '<div class="chat-bubble ' + (msg.isUser ? 'user' : 'fish') + (msg.thinking ? ' thinking' : '') + '">' +
+                '<div class="bubble-label">' + (msg.isUser ? 'You' : '🐟 Fishseus') + '</div>' +
+                esc(msg.text) +
+            '</div>'
+        ).join('');
+        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const text = chatInput.value.trim();
+        if (!text) return;
+
+        chatHistory.push({ text, isUser: true });
+        chatInput.value = '';
+
+        // Add thinking indicator
+        chatHistory.push({ text: 'Thinking…', isUser: false, thinking: true });
+        renderChat();
+
+        try {
+            const data = await api('POST', '/api/talk', { message: text });
+            // Remove thinking indicator
+            chatHistory.pop();
+            if (data.reply) {
+                chatHistory.push({ text: data.reply, isUser: false });
+            } else if (data.error) {
+                chatHistory.push({ text: 'Error: ' + data.error, isUser: false });
+            } else {
+                chatHistory.push({ text: 'No response.', isUser: false });
+            }
+        } catch (e) {
+            chatHistory.pop();
+            chatHistory.push({ text: 'Network error: ' + e.message, isUser: false });
+        }
+        renderChat();
+    }
+
+    chatSendBtn.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+
+    // =====================================================================
+    // Motor Test Controls
+    // =====================================================================
+    async function motorAction(command, data = {}) {
+        try {
+            const resp = await api('POST', '/api/motor/' + command, data);
+            if (resp.status) showToast(resp.status, 'info');
+            else if (resp.error) showToast(resp.error, 'error');
+        } catch (e) {
+            showToast('Motor command failed', 'error');
+        }
+    }
+
+    document.getElementById('btn-open-mouth').addEventListener('click', () => {
+        motorAction('open_mouth', {
+            duration: parseFloat(document.getElementById('test-mouth-duration').value),
+            speed: parseInt(document.getElementById('test-mouth-speed').value, 10),
+        });
+    });
+
+    document.getElementById('btn-wiggle').addEventListener('click', () => {
+        motorAction('wiggle', {
+            cycles: parseInt(document.getElementById('test-wiggle-cycles').value, 10),
+        });
+    });
+
+    document.getElementById('btn-speak-placeholder').addEventListener('click', () => {
+        motorAction('speak_placeholder', {
+            duration_s: parseFloat(document.getElementById('test-speak-duration').value),
+        });
+    });
+
+    document.getElementById('btn-stop-motion').addEventListener('click', () => {
+        motorAction('stop');
+    });
+
+    // =====================================================================
+    // Dashboard Actions
+    // =====================================================================
+    document.getElementById('btn-refresh-status').addEventListener('click', loadStatus);
+
+    document.getElementById('btn-reset-services').addEventListener('click', async () => {
+        try {
+            const resp = await api('POST', '/api/services/reset');
+            showToast(resp.status || 'Services reset', 'info');
+            setTimeout(loadStatus, 500);
+        } catch (e) {
+            showToast('Reset failed', 'error');
+        }
+    });
+
+    // =====================================================================
+    // Init
+    // =====================================================================
+    loadConfig();
+    loadPersonality();
+    loadStatus();
+    switchSection('dashboard');
+});
+</script>
 </body>
 </html>

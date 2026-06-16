@@ -66,5 +66,9 @@
         "neutral_return_time": 0.03
       }
     }
+  },
+  "assistant": {
+    "assistant_name": "Fishseus",
+    "user_name": "User"
   }
 }

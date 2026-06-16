@@ -1,1 +1,4 @@
-.wav
+*.wav
+__pycache__/
+.venv/
+*.pyc
