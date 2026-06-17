@@ -30,8 +30,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 ROOT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT_DIR.parent
-CONFIG_FILE = ROOT_DIR / "fish_config.json"
-PERSONALITY_FILE = PROJECT_ROOT / "config" / "personality_prompt.txt"
+CONFIG_FILE = PROJECT_ROOT / "config" / "fish_config.json"
 
 # Add each service directory to sys.path so bare module imports work,
 # matching the pattern used by the orchestrator.
@@ -148,6 +147,7 @@ DEFAULT_CONFIG: dict[str, object] = {
     "assistant": {
         "assistant_name": "Fishseus",
         "user_name": "User",
+        "personality_path": "../config/personality_prompt.txt",
     },
 }
 
@@ -261,8 +261,8 @@ def init_services() -> None:
                     assistant_name=ac.get("assistant_name", "Fishseus"),
                     user_name=ac.get("user_name", "User"),
                     personality_path=Path(
-                        ac.get("personality_path", str(PERSONALITY_FILE))
-                    ),
+                        ac.get("personality_path", "../config/personality_prompt.txt")
+                    ).resolve(),
                     memory_path=Path(
                         ac.get(
                             "memory_path",
@@ -431,9 +431,13 @@ def api_section(section: str):
 @app.route("/api/personality", methods=["GET", "POST"])
 def api_personality():
     """Read or write the personality prompt text file."""
+    config = load_config()
+    rel_path = config.get("assistant", {}).get("personality_path", "../config/personality_prompt.txt")
+    personality_file = (ROOT_DIR / rel_path).resolve()
+
     if request.method == "GET":
         try:
-            text = PERSONALITY_FILE.read_text(encoding="utf-8") if PERSONALITY_FILE.exists() else ""
+            text = personality_file.read_text(encoding="utf-8") if personality_file.exists() else ""
         except Exception:
             text = ""
         return jsonify({"text": text})
@@ -442,8 +446,8 @@ def api_personality():
     data = request.get_json(silent=True) or {}
     text = data.get("text", "")
     try:
-        PERSONALITY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        PERSONALITY_FILE.write_text(text, encoding="utf-8")
+        personality_file.parent.mkdir(parents=True, exist_ok=True)
+        personality_file.write_text(text, encoding="utf-8")
         return jsonify({"status": "saved"})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

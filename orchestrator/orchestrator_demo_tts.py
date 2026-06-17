@@ -39,6 +39,7 @@ Expected project structure example:
 
 from __future__ import annotations
 
+import json
 import signal
 import subprocess
 import sys
@@ -129,24 +130,43 @@ class FishseusTtsDemoOrchestrator:
     # Setup
     # ------------------------------------------------------------------
     def initialize(self) -> None:
+        config_file = PROJECT_ROOT / "config" / "fish_config.json"
+        app_config = {}
+        if config_file.exists():
+            with open(config_file, "r", encoding="utf-8") as f:
+                app_config = json.load(f)
+
+        audio_cfg = app_config.get("audio", {})
+        stt_cfg = app_config.get("stt", {})
+        llm_cfg = app_config.get("llm", {})
+        tts_cfg = app_config.get("tts", {})
+        motion_cfg = app_config.get("motion", {})
+        assistant_cfg = app_config.get("assistant", {})
+
         cfg = self.config
         cfg.speech_wav_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.memory_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.history_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg.personality_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg.tts_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Resolve paths relative to config dir if they are relative
+        config_dir = config_file.parent
+        pers_path = (config_dir / assistant_cfg.get("personality_path", "personality_prompt.txt")).resolve()
+        pers_path.parent.mkdir(parents=True, exist_ok=True)
+
+        tts_out = (config_dir / tts_cfg.get("output_dir", "../tmp/tts")).resolve()
+        tts_out.mkdir(parents=True, exist_ok=True)
 
         print("[orchestrator] Initializing audio service...")
         self.audio = AudioService(
             AudioConfig(
-                device=cfg.audio_device,
-                sample_rate=16000,
-                channels=1,
-                speech_threshold=0.003,
-                silence_threshold=0.0008,
-                silence_timeout_s=1.0,
-                max_record_seconds=12.0,
-                pre_roll_seconds=0.4,
+                device=audio_cfg.get("device", cfg.audio_device),
+                sample_rate=audio_cfg.get("sample_rate", 16000),
+                channels=audio_cfg.get("channels", 1),
+                speech_threshold=audio_cfg.get("speech_threshold", 0.003),
+                silence_threshold=audio_cfg.get("silence_threshold", 0.0008),
+                silence_timeout_s=audio_cfg.get("silence_timeout_s", 1.0),
+                max_record_seconds=audio_cfg.get("max_record_seconds", 12.0),
+                pre_roll_seconds=audio_cfg.get("pre_roll_seconds", 0.4),
             )
         )
         self.audio.initialize()
@@ -154,10 +174,10 @@ class FishseusTtsDemoOrchestrator:
         print("[orchestrator] Initializing STT service...")
         self.stt = SttService(
             SttConfig(
-                whisper_binary=str(cfg.whisper_binary),
-                model_path=str(cfg.whisper_model),
-                threads=cfg.whisper_threads,
-                wake_words=cfg.wake_words,
+                whisper_binary=str((config_dir / stt_cfg.get("whisper_binary", "../stt/whisper.cpp/build/bin/whisper-cli")).resolve()),
+                model_path=str((config_dir / stt_cfg.get("model_path", "../stt/whisper.cpp/models/ggml-base.en.bin")).resolve()),
+                threads=stt_cfg.get("threads", cfg.whisper_threads),
+                wake_words=stt_cfg.get("wake_words", list(cfg.wake_words)),
                 strip_wake_word=False,
             )
         )
@@ -166,31 +186,31 @@ class FishseusTtsDemoOrchestrator:
         print("[orchestrator] Initializing LLM service...")
         self.llm = LlmService(
             LlmConfig(
-                endpoint_url=cfg.llm_endpoint,
-                model=cfg.llm_model,
+                endpoint_url=llm_cfg.get("endpoint_url", cfg.llm_endpoint),
+                model=llm_cfg.get("model", cfg.llm_model),
                 timeout_s=45.0,
                 retries=1,
-                temperature=0.7,
-                max_tokens=512,
-                disable_reasoning=True,
+                temperature=llm_cfg.get("temperature", 0.7),
+                max_tokens=llm_cfg.get("max_tokens", 512),
+                disable_reasoning=llm_cfg.get("disable_reasoning", True),
             )
         )
 
         print("[orchestrator] Initializing TTS service...")
         self.tts = TtsService(
             TtsConfig(
-                piper_binary=cfg.piper_binary,
-                voices_dir=cfg.voices_dir,
-                default_voice=cfg.default_voice,
-                audio_device=cfg.tts_audio_device,
-                output_dir=cfg.tts_output_dir,
+                piper_binary=str((config_dir / tts_cfg.get("piper_binary", "../tts/.venv/bin/piper")).resolve()),
+                voices_dir=Path((config_dir / tts_cfg.get("voices_dir", "../tts/voices")).resolve()),
+                default_voice=tts_cfg.get("default_voice", cfg.default_voice),
+                audio_device=tts_cfg.get("audio_device", cfg.tts_audio_device),
+                output_dir=tts_out,
             )
         )
         voices = self.tts.available_voices()
         print(f"[orchestrator] Available TTS voices: {voices}")
 
         print("[orchestrator] Initializing motion service...")
-        self.motion = self._build_motion_service()
+        self.motion = self._build_motion_service(motion_cfg)
         self.motion.initialize()
 
         print("[orchestrator] Initializing assistant service...")
@@ -198,7 +218,9 @@ class FishseusTtsDemoOrchestrator:
         self.assistant = AssistantService(
             llm=self.llm,
             config=AssistantConfig(
-                personality_path=cfg.personality_path,
+                assistant_name=assistant_cfg.get("assistant_name", "Fishseus"),
+                user_name=assistant_cfg.get("user_name", "User"),
+                personality_path=pers_path,
                 memory_path=cfg.memory_path,
                 history_path=cfg.history_path,
             ),
@@ -209,37 +231,38 @@ class FishseusTtsDemoOrchestrator:
         self.audio.start_capture(amplitude_callback=self._print_amplitude_debug)
         print("[orchestrator] Ready. Say the wake word, e.g. 'fish'. Press Ctrl+C to stop.")
 
-    def _build_motion_service(self) -> MotionService:
+    def _build_motion_service(self, motion_cfg: dict) -> MotionService:
         """
-        Edit these pins/speeds to match your working motion_service.py test.
+        Build motor configs dynamically from JSON or fallback to defaults.
         """
-        motors = {
-            "mouth": MotorConfig(
-                in1=17,
-                in2=27,
-                en=22,
-                forward_speed=82,
-                reverse_speed=55,
-                neutral_return_time=0.04,
-            ),
-            "tail": MotorConfig(
-                in1=23,
-                in2=24,
-                en=25,
-                forward_speed=72,
-                reverse_speed=48,
-                neutral_return_time=0.03,
-            ),
-            "body": MotorConfig(
-                in1=5,
-                in2=6,
-                en=12,
-                forward_speed=68,
-                reverse_speed=45,
-                neutral_return_time=0.03,
-            ),
-        }
-        return MotionService(motors=motors)
+        motors_raw = motion_cfg.get("motors", {})
+        motors = {}
+        for name, m in motors_raw.items():
+            motors[name] = MotorConfig(
+                in1=int(m.get("in1", 0)),
+                in2=int(m.get("in2", 0)),
+                en=int(m.get("en", 0)),
+                forward_speed=float(m.get("forward_speed", 70)),
+                reverse_speed=float(m.get("reverse_speed", 55)),
+                neutral_return_time=float(m.get("neutral_return_time", 0.08)),
+            )
+
+        if not motors:
+            motors = {
+                "mouth": MotorConfig(17, 27, 22, 82, 55, 0.04),
+                "tail": MotorConfig(23, 24, 25, 72, 48, 0.03),
+                "body": MotorConfig(5, 6, 12, 68, 45, 0.03),
+            }
+
+        return MotionService(
+            motors=motors,
+            pwm_frequency=int(motion_cfg.get("pwm_frequency", 1000)),
+            body_wiggle_time=float(motion_cfg.get("body_wiggle_time", 0.18)),
+            tail_wiggle_time=float(motion_cfg.get("tail_wiggle_time", 0.14)),
+            mouth_open_time=float(motion_cfg.get("mouth_open_time", 0.09)),
+            mouth_close_time=float(motion_cfg.get("mouth_close_time", 0.04)),
+            envelope_window_s=float(motion_cfg.get("envelope_window_s", 0.18)),
+        )
 
     def _build_tool_registry(self, motion: MotionService, tts: TtsService) -> ToolRegistry:
         registry = ToolRegistry()
