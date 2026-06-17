@@ -1,0 +1,75 @@
+{
+  "audio": {
+    "device": "plughw:3,0",
+    "sample_rate": 16000,
+    "channels": 1,
+    "speech_threshold": 0.003,
+    "silence_threshold": 0.0008,
+    "silence_timeout_s": 1.0,
+    "max_record_seconds": 12.0,
+    "pre_roll_seconds": 0.4
+  },
+  "stt": {
+    "whisper_binary": "../stt/whisper.cpp/build/bin/whisper-cli",
+    "model_path": "../stt/whisper.cpp/models/ggml-base.en.bin",
+    "threads": 4,
+    "wake_words": [
+      "fish",
+      "fishseus",
+      "hey fish"
+    ]
+  },
+  "llm": {
+    "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
+    "model": "qwen2.5:3b",
+    "temperature": 0.7,
+    "max_tokens": 512,
+    "disable_reasoning": true
+  },
+  "tts": {
+    "piper_binary": "../tts/.venv/bin/piper",
+    "voices_dir": "../tts/voices",
+    "default_voice": "en_US-arctic-medium",
+    "audio_device": "plughw:0,0",
+    "output_dir": "../tmp/tts"
+  },
+  "motion": {
+    "pwm_frequency": 1000,
+    "body_wiggle_time": 0.17,
+    "tail_wiggle_time": 0.18,
+    "mouth_open_time": 0.12,
+    "mouth_close_time": 0.02,
+    "envelope_window_s": 0.18,
+    "motors": {
+      "mouth": {
+        "in1": 17,
+        "in2": 27,
+        "en": 22,
+        "forward_speed": 82,
+        "reverse_speed": 20,
+        "neutral_return_time": 0.04
+      },
+      "tail": {
+        "in1": 23,
+        "in2": 24,
+        "en": 25,
+        "forward_speed": 0,
+        "reverse_speed": 0,
+        "neutral_return_time": 0.02
+      },
+      "body": {
+        "in1": 5,
+        "in2": 6,
+        "en": 12,
+        "forward_speed": 82,
+        "reverse_speed": 25,
+        "neutral_return_time": 0.02
+      }
+    }
+  },
+  "assistant": {
+    "assistant_name": "Fishseus",
+    "user_name": "User",
+    "personality_path": "../config/personality_prompt.txt"
+  }
+}
