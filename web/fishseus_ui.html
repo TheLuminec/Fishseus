@@ -393,6 +393,64 @@
                     <button class="btn btn-danger btn-sm motor-btn" id="btn-stop-motion">⏹ Stop All</button>
                 </div>
             </div>
+
+            <!-- Fine Motor Control -->
+            <div class="motor-test-panel" id="fine-control-panel">
+                <h3>🔧 Fine Motor Control</h3>
+                <p style="color: var(--text-secondary); font-size: 12px; margin-bottom: 16px;">
+                    Hold the <strong>Forward</strong> or <strong>Reverse</strong> button to drive a motor at the selected speed. The motor stops when you release.
+                </p>
+                <div class="fine-motor-grid">
+                    <div class="fine-motor-card" data-motor="mouth">
+                        <div class="fine-motor-header">
+                            <span class="fine-motor-name">🫦 Mouth</span>
+                            <span class="fine-motor-speed-readout" id="fine-speed-mouth">50%</span>
+                        </div>
+                        <div class="fine-motor-slider-row">
+                            <label>Speed</label>
+                            <input type="range" class="fine-speed-slider" id="fine-slider-mouth" min="0" max="100" value="50">
+                        </div>
+                        <div class="fine-motor-buttons">
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="mouth" data-dir="forward">◀ Forward</button>
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="mouth" data-dir="reverse">Reverse ▶</button>
+                            <button class="btn btn-danger btn-sm fine-stop-btn motor-btn" data-motor="mouth">⏹</button>
+                        </div>
+                    </div>
+                    <div class="fine-motor-card" data-motor="tail">
+                        <div class="fine-motor-header">
+                            <span class="fine-motor-name">🐠 Tail</span>
+                            <span class="fine-motor-speed-readout" id="fine-speed-tail">50%</span>
+                        </div>
+                        <div class="fine-motor-slider-row">
+                            <label>Speed</label>
+                            <input type="range" class="fine-speed-slider" id="fine-slider-tail" min="0" max="100" value="50">
+                        </div>
+                        <div class="fine-motor-buttons">
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="tail" data-dir="forward">◀ Forward</button>
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="tail" data-dir="reverse">Reverse ▶</button>
+                            <button class="btn btn-danger btn-sm fine-stop-btn motor-btn" data-motor="tail">⏹</button>
+                        </div>
+                    </div>
+                    <div class="fine-motor-card" data-motor="body">
+                        <div class="fine-motor-header">
+                            <span class="fine-motor-name">🐟 Body</span>
+                            <span class="fine-motor-speed-readout" id="fine-speed-body">50%</span>
+                        </div>
+                        <div class="fine-motor-slider-row">
+                            <label>Speed</label>
+                            <input type="range" class="fine-speed-slider" id="fine-slider-body" min="0" max="100" value="50">
+                        </div>
+                        <div class="fine-motor-buttons">
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="body" data-dir="forward">◀ Forward</button>
+                            <button class="btn btn-secondary btn-sm fine-drive-btn motor-btn" data-motor="body" data-dir="reverse">Reverse ▶</button>
+                            <button class="btn btn-danger btn-sm fine-stop-btn motor-btn" data-motor="body">⏹</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-top: 12px;">
+                    <button class="btn btn-danger motor-btn" id="fine-estop">⚡ Emergency Stop All</button>
+                </div>
+            </div>
         </div>
 
         <!-- Personality -->
@@ -813,6 +871,76 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('btn-stop-motion').addEventListener('click', () => {
         motorAction('stop');
+    });
+
+    // =====================================================================
+    // Fine Motor Control — Hold-to-Drive
+    // =====================================================================
+
+    // Speed slider readouts
+    document.querySelectorAll('.fine-speed-slider').forEach(slider => {
+        const motor = slider.id.replace('fine-slider-', '');
+        const readout = document.getElementById('fine-speed-' + motor);
+        slider.addEventListener('input', () => {
+            if (readout) readout.textContent = slider.value + '%';
+        });
+    });
+
+    // Hold-to-drive: mousedown/touchstart = start, mouseup/touchend/mouseleave = stop
+    function startDrive(btn) {
+        const motor = btn.dataset.motor;
+        const dir = btn.dataset.dir;
+        const slider = document.getElementById('fine-slider-' + motor);
+        const speed = slider ? parseInt(slider.value, 10) : 50;
+
+        btn.classList.add('driving');
+        api('POST', '/api/motor/direct_drive', { motor, direction: dir, speed })
+            .catch(() => {});
+    }
+
+    function stopDrive(btn) {
+        if (!btn.classList.contains('driving')) return;
+        const motor = btn.dataset.motor;
+        btn.classList.remove('driving');
+        api('POST', '/api/motor/direct_stop', { motor })
+            .catch(() => {});
+    }
+
+    document.querySelectorAll('.fine-drive-btn').forEach(btn => {
+        // Mouse events
+        btn.addEventListener('mousedown', (e) => { e.preventDefault(); startDrive(btn); });
+        btn.addEventListener('mouseup', () => stopDrive(btn));
+        btn.addEventListener('mouseleave', () => stopDrive(btn));
+        // Touch events (mobile / tablet)
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); startDrive(btn); });
+        btn.addEventListener('touchend', () => stopDrive(btn));
+        btn.addEventListener('touchcancel', () => stopDrive(btn));
+    });
+
+    // Per-motor stop buttons
+    document.querySelectorAll('.fine-stop-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            api('POST', '/api/motor/direct_stop', { motor: btn.dataset.motor }).catch(() => {});
+            showToast(btn.dataset.motor + ' stopped', 'info');
+        });
+    });
+
+    // Emergency stop
+    document.getElementById('fine-estop').addEventListener('click', () => {
+        api('POST', '/api/motor/direct_stop', {}).catch(() => {});
+        api('POST', '/api/motor/stop', {}).catch(() => {});
+        document.querySelectorAll('.fine-drive-btn.driving').forEach(b => b.classList.remove('driving'));
+        showToast('Emergency stop — all motors halted', 'error');
+    });
+
+    // Safety: stop everything if the tab loses focus
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            document.querySelectorAll('.fine-drive-btn.driving').forEach(b => {
+                b.classList.remove('driving');
+            });
+            api('POST', '/api/motor/direct_stop', {}).catch(() => {});
+        }
     });
 
     // =====================================================================

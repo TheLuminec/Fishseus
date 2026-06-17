@@ -509,6 +509,18 @@ def api_motor(command: str):
             _motion.stop_all()
             return jsonify({"status": "All motors stopped"})
 
+        if command == "direct_drive":
+            motor = data.get("motor", "")
+            direction = data.get("direction", "forward")
+            speed = float(data.get("speed", 50))
+            _motion.direct_drive(motor, direction, speed)
+            return jsonify({"status": f"{motor} driving {direction} at {speed}%"})
+
+        if command == "direct_stop":
+            motor = data.get("motor")  # None = all
+            _motion.direct_stop(motor)
+            return jsonify({"status": f"{'All motors' if motor is None else motor} stopped"})
+
         return jsonify({"error": f"Unknown motor command '{command}'"}), 404
 
     except Exception as exc:

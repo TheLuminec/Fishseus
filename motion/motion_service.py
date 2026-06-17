@@ -139,6 +139,55 @@ class MotionService:
         self._cancel_motion.set()
         self._hard_stop_all()
 
+    # -----------------------------------------------------------------
+    # Direct (non-queued) motor control for fine tuning
+    # -----------------------------------------------------------------
+    def direct_drive(self, motor_name: str, direction: str, speed: float) -> None:
+        """
+        Immediately drive a motor at the given speed and direction.
+
+        This bypasses the worker queue entirely so the web UI can
+        implement hold-to-run buttons for real-time motor tuning.
+
+        Parameters:
+            motor_name: One of the configured motor names (mouth, tail, body).
+            direction:  "forward" or "reverse".
+            speed:      PWM duty cycle 0-100.
+        """
+        if not self._initialized:
+            raise RuntimeError("MotionService.initialize() must be called first")
+        if motor_name not in self.motors:
+            raise ValueError(f"Unknown motor '{motor_name}'")
+
+        with self._lock:
+            if direction == "forward":
+                self._drive_forward(motor_name, speed)
+            elif direction == "reverse":
+                self._drive_reverse(motor_name, speed)
+            else:
+                raise ValueError(f"direction must be 'forward' or 'reverse', got '{direction}'")
+
+    def direct_stop(self, motor_name: str | None = None) -> None:
+        """
+        Immediately stop a specific motor (or all motors if name is None).
+
+        Sets idle pins and duty cycle to 0.  Does not cancel queued
+        motions — use stop_all() for that.
+        """
+        if not self._initialized:
+            raise RuntimeError("MotionService.initialize() must be called first")
+
+        with self._lock:
+            if motor_name is None:
+                self._hard_stop_all()
+            else:
+                if motor_name not in self.motors:
+                    raise ValueError(f"Unknown motor '{motor_name}'")
+                self._set_idle_pins(motor_name)
+                pwm = self._pwms.get(motor_name)
+                if pwm is not None:
+                    pwm.ChangeDutyCycle(0)
+
     # ---------------------------------------------------------------------
     # Worker + queue
     # ---------------------------------------------------------------------
