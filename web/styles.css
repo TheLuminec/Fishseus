@@ -635,6 +635,187 @@ body::before {
     outline: none;
 }
 
+/* ===== Audio Amplitude Monitor ===== */
+.audio-monitor-card {
+    overflow: hidden;
+}
+
+.audio-monitor-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.audio-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.audio-monitor-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 5px 14px !important;
+    font-size: 12px !important;
+}
+
+.audio-canvas-wrapper {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+    margin-bottom: 16px;
+}
+
+.audio-canvas-wrapper canvas {
+    display: block;
+    width: 100%;
+    height: 200px;
+}
+
+.audio-legend {
+    display: flex;
+    gap: 16px;
+    padding: 8px 12px;
+    background: rgba(5, 11, 21, 0.7);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 3px;
+    border-radius: 1px;
+}
+
+.audio-realtime-readout {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.audio-readout-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: rgba(6, 11, 21, 0.5);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 10px 16px;
+    min-width: 100px;
+}
+
+.audio-readout-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.audio-readout-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--bio-cyan);
+}
+
+/* Threshold sliders */
+.threshold-slider-group {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.threshold-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.threshold-slider-row label {
+    min-width: 130px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.threshold-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: rgba(100, 116, 139, 0.25);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+}
+
+.speech-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    border-radius: 50%;
+    cursor: grab;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.35);
+}
+
+.speech-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    border-radius: 50%;
+    border: none;
+    cursor: grab;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.35);
+}
+
+.silence-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border-radius: 50%;
+    cursor: grab;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
+}
+
+.silence-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border-radius: 50%;
+    border: none;
+    cursor: grab;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.35);
+}
+
+.threshold-readout {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 60px;
+    text-align: right;
+}
+
 /* ===== Fine Motor Control ===== */
 .fine-motor-grid {
     display: grid;

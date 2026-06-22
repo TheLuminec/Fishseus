@@ -20,6 +20,9 @@ from __future__ import annotations
 import atexit
 import json
 import sys
+import threading
+import time
+from collections import deque
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -45,11 +48,19 @@ for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts"):
 # ---------------------------------------------------------------------
 
 _available: dict[str, bool] = {
+    "audio": False,
     "llm": False,
     "assistant": False,
     "motion": False,
     "tts": False,
 }
+
+# Audio (requires ALSA / arecord — Linux only)
+try:
+    from audio_service import AudioConfig, AudioService  # type: ignore[import-untyped]
+    _available["audio"] = True
+except Exception:
+    AudioConfig = AudioService = None  # type: ignore[assignment, misc]
 
 # LLM
 try:
@@ -183,10 +194,16 @@ def save_config(config: dict[str, object]) -> None:
 # Service instances
 # ---------------------------------------------------------------------
 
+_audio: "AudioService | None" = None
 _llm: "LlmService | None" = None
 _assistant: "AssistantService | None" = None
 _motion: "MotionService | None" = None
 _tts: "TtsService | None" = None
+
+# Rolling amplitude buffer for the live graph
+_AMP_HISTORY_SIZE = 200  # ~20 seconds at 10 Hz
+_amp_history: deque[dict] = deque(maxlen=_AMP_HISTORY_SIZE)
+_amp_lock = threading.Lock()
 
 
 def _build_motor_configs(motion_conf: dict) -> "dict[str, MotorConfig]":
@@ -207,8 +224,31 @@ def _build_motor_configs(motion_conf: dict) -> "dict[str, MotorConfig]":
 
 def init_services() -> None:
     """Initialise all available services using current config."""
-    global _llm, _assistant, _motion, _tts
+    global _audio, _llm, _assistant, _motion, _tts
     config = load_config()
+
+    # --- Audio ---
+    if _available["audio"] and _audio is None:
+        try:
+            ac = config.get("audio", {})
+            _audio = AudioService(
+                AudioConfig(
+                    device=ac.get("device", "default"),
+                    sample_rate=int(ac.get("sample_rate", 16000)),
+                    channels=int(ac.get("channels", 1)),
+                    speech_threshold=float(ac.get("speech_threshold", 0.003)),
+                    silence_threshold=float(ac.get("silence_threshold", 0.0008)),
+                    silence_timeout_s=float(ac.get("silence_timeout_s", 1.0)),
+                    max_record_seconds=float(ac.get("max_record_seconds", 12.0)),
+                    pre_roll_seconds=float(ac.get("pre_roll_seconds", 0.4)),
+                )
+            )
+            _audio.initialize()
+            print("[web] Audio service ready")
+        except Exception as exc:
+            print(f"[web] Audio service init failed: {exc}")
+            _audio = None
+            _available["audio"] = False
 
     # --- Motion ---
     if _available["motion"] and _motion is None:
@@ -309,7 +349,13 @@ def init_services() -> None:
 
 def reset_services() -> None:
     """Tear down all service instances so they can be reinitialised."""
-    global _llm, _assistant, _motion, _tts
+    global _audio, _llm, _assistant, _motion, _tts
+
+    if _audio is not None:
+        try:
+            _audio.shutdown()
+        except Exception:
+            pass
 
     if _motion is not None:
         try:
@@ -324,16 +370,21 @@ def reset_services() -> None:
         except Exception:
             pass
 
+    _audio = None
     _llm = None
     _assistant = None
     _motion = None
     _tts = None
+
+    with _amp_lock:
+        _amp_history.clear()
 
     # Reset availability flags to allow re-detection
     for key in _available:
         _available[key] = True
 
     # Re-check what's importable
+    _available["audio"] = AudioService is not None
     _available["llm"] = LlmService is not None
     _available["assistant"] = AssistantService is not None and LlmService is not None
     _available["motion"] = MotionService is not None
@@ -342,6 +393,11 @@ def reset_services() -> None:
 
 def shutdown_services() -> None:
     """Clean shutdown of services for atexit."""
+    if _audio is not None:
+        try:
+            _audio.shutdown()
+        except Exception:
+            pass
     if _motion is not None:
         try:
             _motion.stop_all()
@@ -384,6 +440,7 @@ def api_status():
     return jsonify(
         {
             "services": {
+                "audio": "ready" if _available["audio"] and _audio is not None else "unavailable",
                 "llm": "ready" if _available["llm"] and _llm is not None else "unavailable",
                 "assistant": "ready" if _available["assistant"] and _assistant is not None else "unavailable",
                 "motion": "ready" if _available["motion"] and _motion is not None else "unavailable",
@@ -424,6 +481,57 @@ def api_section(section: str):
     config[section] = config_section
     save_config(config)
     return jsonify({"status": "saved"})
+
+# --- Audio amplitude streaming ---
+
+def _amplitude_callback(amp: float) -> None:
+    """Called by the audio capture thread; stash amplitude in the ring buffer."""
+    entry = {"t": round(time.time(), 3), "a": round(amp, 6)}
+    with _amp_lock:
+        _amp_history.append(entry)
+
+
+@app.route("/api/audio/amplitude")
+def api_audio_amplitude():
+    """Return the rolling amplitude history and the current threshold values."""
+    config = load_config()
+    ac = config.get("audio", {})
+    with _amp_lock:
+        samples = list(_amp_history)
+    return jsonify({
+        "available": _available.get("audio", False) and _audio is not None,
+        "capturing": _audio is not None and _audio._capture_thread is not None
+                     and _audio._capture_thread.is_alive() if _audio else False,
+        "speech_threshold": float(ac.get("speech_threshold", 0.003)),
+        "silence_threshold": float(ac.get("silence_threshold", 0.0008)),
+        "samples": samples,
+    })
+
+
+@app.route("/api/audio/capture/start", methods=["POST"])
+def api_audio_capture_start():
+    """Start the audio capture thread and begin streaming amplitude."""
+    if _audio is None:
+        return jsonify({"error": "Audio service unavailable"}), 503
+    try:
+        _audio.start_capture(amplitude_callback=_amplitude_callback)
+        return jsonify({"status": "Capture started"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/audio/capture/stop", methods=["POST"])
+def api_audio_capture_stop():
+    """Stop the audio capture thread."""
+    if _audio is None:
+        return jsonify({"error": "Audio service unavailable"}), 503
+    try:
+        _audio.stop_capture()
+        with _amp_lock:
+            _amp_history.clear()
+        return jsonify({"status": "Capture stopped"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 # --- Personality prompt (separate file) ---

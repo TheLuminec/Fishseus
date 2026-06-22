@@ -136,34 +136,68 @@
         <div class="content-section" id="sec-audio">
             <div class="section-header">
                 <h2>Audio Settings</h2>
-                <p>Configure microphone input device and recording parameters.</p>
+                <p>Configure microphone input, monitor live amplitude, and tune speech detection thresholds.</p>
             </div>
+
+            <!-- Live Amplitude Monitor -->
+            <div class="card audio-monitor-card">
+                <div class="card-title"><span class="card-icon">📈</span> Live Amplitude Monitor</div>
+                <div class="audio-monitor-status">
+                    <div class="audio-status-indicator" id="audio-capture-status">
+                        <span class="status-dot unavailable" id="audio-capture-dot"></span>
+                        <span id="audio-capture-text">Not capturing</span>
+                    </div>
+                    <div class="audio-monitor-controls">
+                        <button class="btn btn-sm btn-primary" id="btn-capture-start">▶ Start Capture</button>
+                        <button class="btn btn-sm btn-secondary" id="btn-capture-stop">⏹ Stop</button>
+                    </div>
+                </div>
+                <div class="audio-canvas-wrapper">
+                    <canvas id="amplitude-canvas" width="800" height="200"></canvas>
+                    <div class="audio-legend">
+                        <span class="legend-item"><span class="legend-swatch" style="background: #22c55e;"></span> Speech Threshold</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background: #f59e0b;"></span> Silence Threshold</span>
+                        <span class="legend-item"><span class="legend-swatch" style="background: #00b4d8;"></span> Amplitude</span>
+                    </div>
+                </div>
+                <div class="audio-realtime-readout">
+                    <div class="audio-readout-item">
+                        <span class="audio-readout-label">Current</span>
+                        <span class="audio-readout-value" id="audio-amp-current">0.0000</span>
+                    </div>
+                    <div class="audio-readout-item">
+                        <span class="audio-readout-label">Peak</span>
+                        <span class="audio-readout-value" id="audio-amp-peak">0.0000</span>
+                    </div>
+                    <div class="audio-readout-item">
+                        <span class="audio-readout-label">Average</span>
+                        <span class="audio-readout-value" id="audio-amp-avg">0.0000</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Threshold Tuning -->
             <div class="card">
-                <div class="form-group">
-                    <label for="audio_device">Input Device</label>
-                    <input type="text" id="audio_device">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="audio_sample_rate">Sample Rate (Hz)</label>
-                        <input type="number" id="audio_sample_rate">
+                <div class="card-title"><span class="card-icon">🎚️</span> Threshold Tuning</div>
+                <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
+                    Adjust the sliders to set where speech starts and where silence is detected.
+                    Changes update the graph lines instantly — hit Save to persist.
+                </p>
+                <div class="threshold-slider-group">
+                    <div class="threshold-slider-row">
+                        <label>Speech Threshold</label>
+                        <input type="range" class="threshold-slider speech-slider" id="slider-speech-threshold"
+                               min="0" max="0.05" step="0.0001" value="0.003">
+                        <span class="threshold-readout" id="readout-speech-threshold">0.0030</span>
                     </div>
-                    <div class="form-group">
-                        <label for="audio_channels">Channels</label>
-                        <input type="number" id="audio_channels" min="1">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="audio_speech_threshold">Speech Threshold</label>
-                        <input type="number" id="audio_speech_threshold" step="0.0001">
-                    </div>
-                    <div class="form-group">
-                        <label for="audio_silence_threshold">Silence Threshold</label>
-                        <input type="number" id="audio_silence_threshold" step="0.0001">
+                    <div class="threshold-slider-row">
+                        <label>Silence Threshold</label>
+                        <input type="range" class="threshold-slider silence-slider" id="slider-silence-threshold"
+                               min="0" max="0.02" step="0.0001" value="0.0008">
+                        <span class="threshold-readout" id="readout-silence-threshold">0.0008</span>
                     </div>
                 </div>
-                <div class="form-row">
+                <div class="form-row" style="margin-top: 16px;">
                     <div class="form-group">
                         <label for="audio_silence_timeout_s">Silence Timeout (s)</label>
                         <input type="number" id="audio_silence_timeout_s" step="0.1">
@@ -179,6 +213,25 @@
                 </div>
                 <div class="btn-group">
                     <button class="btn btn-primary" id="save-audio">Save Audio Settings</button>
+                </div>
+            </div>
+
+            <!-- Device Settings -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🎙️</span> Device Configuration</div>
+                <div class="form-group">
+                    <label for="audio_device">Input Device</label>
+                    <input type="text" id="audio_device" placeholder="plughw:3,0">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio_sample_rate">Sample Rate (Hz)</label>
+                        <input type="number" id="audio_sample_rate">
+                    </div>
+                    <div class="form-group">
+                        <label for="audio_channels">Channels</label>
+                        <input type="number" id="audio_channels" min="1">
+                    </div>
                 </div>
             </div>
         </div>
@@ -612,11 +665,19 @@ document.addEventListener('DOMContentLoaded', () => {
             setVal('audio_device', a.device);
             setVal('audio_sample_rate', a.sample_rate);
             setVal('audio_channels', a.channels);
-            setVal('audio_speech_threshold', a.speech_threshold);
-            setVal('audio_silence_threshold', a.silence_threshold);
             setVal('audio_silence_timeout_s', a.silence_timeout_s);
             setVal('audio_max_record_seconds', a.max_record_seconds);
             setVal('audio_pre_roll_seconds', a.pre_roll_seconds);
+
+            // Populate threshold sliders
+            if (a.speech_threshold !== undefined) {
+                document.getElementById('slider-speech-threshold').value = a.speech_threshold;
+                document.getElementById('readout-speech-threshold').textContent = parseFloat(a.speech_threshold).toFixed(4);
+            }
+            if (a.silence_threshold !== undefined) {
+                document.getElementById('slider-silence-threshold').value = a.silence_threshold;
+                document.getElementById('readout-silence-threshold').textContent = parseFloat(a.silence_threshold).toFixed(4);
+            }
 
             // STT
             const s = c.stt || {};
@@ -699,8 +760,8 @@ document.addEventListener('DOMContentLoaded', () => {
             device: getVal('audio_device'),
             sample_rate: getVal('audio_sample_rate', 'int'),
             channels: getVal('audio_channels', 'int'),
-            speech_threshold: getVal('audio_speech_threshold', 'float'),
-            silence_threshold: getVal('audio_silence_threshold', 'float'),
+            speech_threshold: parseFloat(document.getElementById('slider-speech-threshold').value),
+            silence_threshold: parseFloat(document.getElementById('slider-silence-threshold').value),
             silence_timeout_s: getVal('audio_silence_timeout_s', 'float'),
             max_record_seconds: getVal('audio_max_record_seconds', 'float'),
             pre_roll_seconds: getVal('audio_pre_roll_seconds', 'float'),
@@ -955,6 +1016,258 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(loadStatus, 500);
         } catch (e) {
             showToast('Reset failed', 'error');
+        }
+    });
+
+    // =====================================================================
+    // Audio Amplitude Monitor
+    // =====================================================================
+    const ampCanvas = document.getElementById('amplitude-canvas');
+    const ampCtx = ampCanvas.getContext('2d');
+    let ampData = [];          // array of {t, a}
+    let ampPollTimer = null;
+    let ampPeak = 0;
+    let audioAvailable = false;
+
+    // Threshold slider live readout
+    document.getElementById('slider-speech-threshold').addEventListener('input', (e) => {
+        document.getElementById('readout-speech-threshold').textContent = parseFloat(e.target.value).toFixed(4);
+    });
+    document.getElementById('slider-silence-threshold').addEventListener('input', (e) => {
+        document.getElementById('readout-silence-threshold').textContent = parseFloat(e.target.value).toFixed(4);
+    });
+
+    function resizeCanvas() {
+        const wrapper = ampCanvas.parentElement;
+        ampCanvas.width = wrapper.clientWidth;
+        ampCanvas.height = 200;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function drawAmplitudeGraph() {
+        const W = ampCanvas.width;
+        const H = ampCanvas.height;
+        const ctx = ampCtx;
+
+        // Read threshold slider values (live)
+        const speechTh = parseFloat(document.getElementById('slider-speech-threshold').value) || 0.003;
+        const silenceTh = parseFloat(document.getElementById('slider-silence-threshold').value) || 0.0008;
+
+        // Dynamic Y scale: auto-range to max of (peak, speechTh * 2, 0.01)
+        const yMax = Math.max(ampPeak * 1.3, speechTh * 2, 0.01);
+
+        // Clear
+        ctx.clearRect(0, 0, W, H);
+
+        // Background gradient
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+        bgGrad.addColorStop(0, 'rgba(5, 11, 21, 0.95)');
+        bgGrad.addColorStop(1, 'rgba(10, 22, 40, 0.95)');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Grid lines
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.12)';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 5; i++) {
+            const y = (i / 5) * H;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(W, y);
+            ctx.stroke();
+        }
+
+        // Y-axis labels
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.5)';
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'left';
+        for (let i = 0; i <= 4; i++) {
+            const val = (yMax * (4 - i) / 4);
+            const y = (i / 4) * H;
+            ctx.fillText(val.toFixed(4), 4, y + 12);
+        }
+
+        // Speech threshold line
+        const speechY = H - (speechTh / yMax) * H;
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, speechY);
+        ctx.lineTo(W, speechY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.7)';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('Speech ' + speechTh.toFixed(4), W - 6, speechY - 4);
+
+        // Silence threshold line
+        const silenceY = H - (silenceTh / yMax) * H;
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, silenceY);
+        ctx.lineTo(W, silenceY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.7)';
+        ctx.fillText('Silence ' + silenceTh.toFixed(4), W - 6, silenceY - 4);
+
+        // Draw amplitude data
+        if (ampData.length > 1) {
+            const maxPts = 200;
+            const pts = ampData.slice(-maxPts);
+            const step = W / (maxPts - 1);
+
+            // Filled area
+            const areaGrad = ctx.createLinearGradient(0, 0, 0, H);
+            areaGrad.addColorStop(0, 'rgba(0, 180, 216, 0.35)');
+            areaGrad.addColorStop(1, 'rgba(0, 180, 216, 0.02)');
+            ctx.fillStyle = areaGrad;
+            ctx.beginPath();
+            ctx.moveTo(0, H);
+            for (let i = 0; i < pts.length; i++) {
+                const x = i * step;
+                const y = H - (pts[i].a / yMax) * H;
+                ctx.lineTo(x, Math.max(0, y));
+            }
+            ctx.lineTo((pts.length - 1) * step, H);
+            ctx.closePath();
+            ctx.fill();
+
+            // Line
+            ctx.strokeStyle = '#00b4d8';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            for (let i = 0; i < pts.length; i++) {
+                const x = i * step;
+                const y = H - (pts[i].a / yMax) * H;
+                if (i === 0) ctx.moveTo(x, Math.max(0, y));
+                else ctx.lineTo(x, Math.max(0, y));
+            }
+            ctx.stroke();
+
+            // Glow on the leading edge
+            const lastX = (pts.length - 1) * step;
+            const lastY = H - (pts[pts.length - 1].a / yMax) * H;
+            ctx.beginPath();
+            ctx.arc(lastX, Math.max(0, lastY), 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#00b4d8';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(lastX, Math.max(0, lastY), 8, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 180, 216, 0.2)';
+            ctx.fill();
+        }
+    }
+
+    async function pollAmplitude() {
+        try {
+            const data = await api('GET', '/api/audio/amplitude');
+            audioAvailable = data.available;
+
+            // Update capture status indicator
+            const dot = document.getElementById('audio-capture-dot');
+            const txt = document.getElementById('audio-capture-text');
+            if (data.capturing) {
+                dot.className = 'status-dot ready';
+                txt.textContent = 'Capturing';
+            } else if (data.available) {
+                dot.className = 'status-dot unavailable';
+                txt.textContent = 'Stopped';
+            } else {
+                dot.className = 'status-dot unavailable';
+                txt.textContent = 'Unavailable (demo mode)';
+            }
+
+            // Use real samples if available, otherwise generate demo data
+            if (data.samples && data.samples.length > 0) {
+                ampData = data.samples;
+            } else if (!data.available || !data.capturing) {
+                // Demo mode: push simulated noise
+                const now = Date.now() / 1000;
+                const simAmp = 0.0005 + Math.random() * 0.002 + Math.sin(now * 0.8) * 0.0008;
+                ampData.push({ t: now, a: Math.max(0, simAmp) });
+                if (ampData.length > 200) ampData.shift();
+            }
+
+            // Update readouts
+            if (ampData.length > 0) {
+                const current = ampData[ampData.length - 1].a;
+                const avg = ampData.reduce((s, d) => s + d.a, 0) / ampData.length;
+                ampPeak = Math.max(ampPeak, current);
+
+                document.getElementById('audio-amp-current').textContent = current.toFixed(4);
+                document.getElementById('audio-amp-peak').textContent = ampPeak.toFixed(4);
+                document.getElementById('audio-amp-avg').textContent = avg.toFixed(4);
+
+                // Highlight current value color based on threshold
+                const speechTh = parseFloat(document.getElementById('slider-speech-threshold').value);
+                const curEl = document.getElementById('audio-amp-current');
+                if (current >= speechTh) {
+                    curEl.style.color = '#22c55e';
+                } else {
+                    curEl.style.color = '';
+                }
+            }
+
+            // Sync slider values from response if sliders haven't been touched
+            if (data.speech_threshold !== undefined && !document.getElementById('slider-speech-threshold').matches(':active')) {
+                // only sync on first load
+            }
+
+            drawAmplitudeGraph();
+        } catch (e) {
+            // Demo mode fallback on error
+            const now = Date.now() / 1000;
+            ampData.push({ t: now, a: 0.0005 + Math.random() * 0.001 });
+            if (ampData.length > 200) ampData.shift();
+            drawAmplitudeGraph();
+        }
+    }
+
+    // Start/stop amplitude polling when the Audio section is visible
+    function startAmpPolling() {
+        if (ampPollTimer) return;
+        ampPollTimer = setInterval(pollAmplitude, 500);
+        pollAmplitude();
+    }
+    function stopAmpPolling() {
+        if (ampPollTimer) { clearInterval(ampPollTimer); ampPollTimer = null; }
+    }
+
+    // Hook into section switching
+    const origSwitchSection = switchSection;
+    switchSection = function(name) {
+        origSwitchSection(name);
+        if (name === 'audio') {
+            resizeCanvas();
+            startAmpPolling();
+        } else {
+            stopAmpPolling();
+        }
+    };
+
+    // Capture control buttons
+    document.getElementById('btn-capture-start').addEventListener('click', async () => {
+        try {
+            const resp = await api('POST', '/api/audio/capture/start');
+            showToast(resp.status || resp.error || 'Started', 'info');
+        } catch (e) {
+            showToast('Audio service unavailable', 'error');
+        }
+    });
+    document.getElementById('btn-capture-stop').addEventListener('click', async () => {
+        try {
+            const resp = await api('POST', '/api/audio/capture/stop');
+            ampPeak = 0;
+            showToast(resp.status || resp.error || 'Stopped', 'info');
+        } catch (e) {
+            showToast('Audio service unavailable', 'error');
         }
     });
 
