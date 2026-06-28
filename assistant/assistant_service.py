@@ -368,16 +368,18 @@ class AssistantService:
         result = self._assistant_result_from_model(llm_result.content, parsed)
         result.elapsed_s = elapsed
 
-        # Merge deterministic memory updates with model-suggested updates.
-        result.memory_updates = [*local_memory_updates, *result.memory_updates]
+        # Capture model-only suggestions before merging so we don't re-apply
+        # the local updates (which were already written above).
+        model_only_updates = list(result.memory_updates)
+        result.memory_updates = [*local_memory_updates, *model_only_updates]
 
-        # Only apply model-suggested memory if explicit memory intent exists.
+        # Apply model-suggested updates only when explicit memory intent exists.
         if self._memory_writes_allowed(clean_user_text):
-            for update in result.memory_updates:
+            for update in model_only_updates:
                 self._apply_memory_update(update)
             self.memory.save()
         elif local_memory_updates:
-            # Explicit local detector found memory intent, so save those.
+            # Local detector already applied — just persist.
             self.memory.save()
 
         # Execute safe tools requested by model.
@@ -687,7 +689,9 @@ Rules:
 
     @staticmethod
     def _clean_user_text(user_text: str) -> str:
-        text = re.sub(r"\s+", " ", user_text).strip()
+        # Strip Whisper special tokens like <|endoftext|>, <|notimestamps|>, etc.
+        text = re.sub(r"<\|[^|]*\|>", "", user_text)
+        text = re.sub(r"\s+", " ", text).strip()
         return text or "Hello."
 
 
