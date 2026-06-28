@@ -315,13 +315,13 @@ class MotionService:
 
         if level < 0.18:
             speed = min(cfg.forward_speed, 45)
-            duration = 0.03
+            duration = 0.06
         elif level < 0.35:
             speed = min(cfg.forward_speed, 60)
-            duration = 0.05
+            duration = 0.09
         else:
             speed = cfg.forward_speed
-            duration = 0.07
+            duration = 0.12
 
         self._drive_forward("mouth", speed)
         self._sleep_with_cancel(duration)
