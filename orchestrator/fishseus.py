@@ -34,15 +34,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import ast
 import json
-import random
 import signal
 import sys
 import threading
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -60,9 +56,10 @@ for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "web"):
 from audio_service import AudioConfig, AudioService
 from stt_service import SttConfig, SttService
 from llm_service import LlmConfig, LlmService
-from assistant_service import AssistantConfig, AssistantService, Tool, ToolRegistry
+from assistant_service import AssistantConfig, AssistantService
 from motion_service import MotionService, MotorConfig
 from tts_service import TtsConfig, TtsService
+from tools import build_tool_registry
 
 
 # -----------------------------------------------------------------------
@@ -199,7 +196,11 @@ class Fishseus:
 
         # Assistant
         _log("init", "Starting assistant service…")
-        tool_registry = self._build_tool_registry()
+        tool_registry = build_tool_registry(
+            get_motion   = lambda: self.motion,
+            get_tts      = lambda: self.tts,
+            get_assistant= lambda: self.assistant,
+        )
         self.assistant = AssistantService(
             llm=self.llm,
             config=AssistantConfig(
@@ -417,116 +418,6 @@ class Fishseus:
             envelope_window_s= float(motion_cfg.get("envelope_window_s", 0.18)),
         )
 
-    def _build_tool_registry(self) -> ToolRegistry:
-        registry = ToolRegistry()
-
-        def wiggle(cycles: int = 1) -> str:
-            cycles = max(1, min(int(cycles), 5))
-            self.motion.wiggle(cycles=cycles)
-            return f"wiggle queued for {cycles} cycle(s)"
-
-        def open_mouth() -> str:
-            self.motion.open_mouth()
-            return "mouth open queued"
-
-        def set_mode(mode: str) -> str:
-            allowed = {"assistant", "bluetooth"}
-            if mode not in allowed:
-                raise ValueError(f"mode must be one of {sorted(allowed)}")
-            return f"mode switch requested: {mode}"
-
-        def get_current_time() -> str:
-            return time.strftime("%I:%M %p")
-
-        def get_date() -> str:
-            return time.strftime("%A, %B %d, %Y")
-
-        def get_weather(location: str = "") -> str:
-            try:
-                encoded = urllib.parse.quote(location.strip())
-                url = (
-                    f"https://wttr.in/{encoded}?format=%l:+%C,+%t"
-                    if encoded else
-                    "https://wttr.in/?format=%l:+%C,+%t"
-                )
-                req = urllib.request.Request(url, headers={"User-Agent": "Fishseus/1.0"})
-                with urllib.request.urlopen(req, timeout=6) as resp:
-                    text = resp.read().decode("utf-8", errors="ignore").strip()
-                # Strip non-ASCII so TTS doesn't choke on degree symbols etc.
-                text = text.encode("ascii", "ignore").decode().strip()
-                return text or "Weather data unavailable"
-            except Exception as exc:
-                return f"Could not reach the weather currents: {exc}"
-
-        def flip_coin() -> str:
-            return random.choice(["heads", "tails"])
-
-        def roll_dice(sides: int = 6, count: int = 1) -> str:
-            sides = max(2, min(int(sides), 100))
-            count = max(1, min(int(count), 10))
-            rolls = [random.randint(1, sides) for _ in range(count)]
-            if count == 1:
-                return str(rolls[0])
-            total = sum(rolls)
-            roll_str = ", ".join(str(r) for r in rolls)
-            return f"{roll_str}, total {total}"
-
-        def calculate(expression: str) -> str:
-            _SAFE_NODES = {
-                ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
-                ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
-                ast.Mod, ast.Pow, ast.USub, ast.UAdd,
-            }
-            try:
-                tree = ast.parse(expression.strip(), mode="eval")
-                for node in ast.walk(tree):
-                    if type(node) not in _SAFE_NODES:
-                        return "Only basic arithmetic is supported"
-                result = eval(compile(tree, "<expr>", "eval"))  # noqa: S307 — guarded above
-                if isinstance(result, float):
-                    return str(int(result)) if result.is_integer() else f"{result:.6g}"
-                return str(result)
-            except ZeroDivisionError:
-                return "Division by zero — even the ocean has limits"
-            except Exception:
-                return "Could not parse that expression"
-
-        def recall_memory() -> str:
-            if self.assistant is None:
-                return "Memory not initialised yet"
-            # Return raw summary — formulate_tool_response will turn it into natural speech.
-            return self.assistant.memory.compact_summary()
-
-        def list_voices() -> str:
-            voices = self.tts.available_voices()
-            return ", ".join(voices) if voices else "no voices found"
-
-        def set_voice(voice: str) -> str:
-            self.tts.set_voice(voice)
-            return f"voice set to {voice}"
-
-        # returns_data=False     → fire-and-forget, result never spoken
-        # returns_data=True,
-        #   synthesize_result=False → speak raw result directly (short values: time, dice, math)
-        #   synthesize_result=True  → feed result back to LLM for a natural spoken response
-        tools = [
-            Tool("wiggle",           "Make the fish wiggle. Args: cycles int 1-5.",                           wiggle,           "safe", returns_data=False, synthesize_result=False),
-            Tool("open_mouth",       "Open the fish mouth once. No args.",                                    open_mouth,       "safe", returns_data=False, synthesize_result=False),
-            Tool("set_mode",         "Request a mode switch. Args: mode — 'assistant' or 'bluetooth'.",       set_mode,         "safe", returns_data=False, synthesize_result=False),
-            Tool("get_current_time", "Get the current clock time. No args.",                                  get_current_time, "safe", returns_data=True,  synthesize_result=False),
-            Tool("get_date",         "Get today's full date. No args.",                                       get_date,         "safe", returns_data=True,  synthesize_result=False),
-            Tool("get_weather",      "Get current weather. Args: location string (city or empty for local).", get_weather,      "safe", returns_data=True,  synthesize_result=True),
-            Tool("flip_coin",        "Flip a coin. Returns heads or tails. No args.",                         flip_coin,        "safe", returns_data=True,  synthesize_result=False),
-            Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe", returns_data=True,  synthesize_result=False),
-            Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe", returns_data=True,  synthesize_result=False),
-            Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe", returns_data=True,  synthesize_result=True),
-            Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe", returns_data=True,  synthesize_result=False),
-            Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe", returns_data=False, synthesize_result=False),
-        ]
-        for t in tools:
-            registry.register(t)
-        return registry
-
     # -------------------------------------------------------------------
     # Web server
     # -------------------------------------------------------------------
@@ -541,6 +432,8 @@ class Fishseus:
                 motion    = self.motion,
                 tts       = self.tts,
             )
+            if self.assistant is not None:
+                _web.set_tool_registry(self.assistant.tool_registry)
             thread = threading.Thread(
                 target=_web.app.run,
                 kwargs={

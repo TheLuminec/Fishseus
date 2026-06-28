@@ -71,10 +71,10 @@ except Exception:
 
 # Assistant (also needs llm to function)
 try:
-    from assistant_service import AssistantConfig, AssistantService  # type: ignore[import-untyped]
+    from assistant_service import AssistantConfig, AssistantService, ToolCall  # type: ignore[import-untyped]
     _available["assistant"] = True
 except Exception:
-    AssistantConfig = AssistantService = None  # type: ignore[assignment, misc]
+    AssistantConfig = AssistantService = ToolCall = None  # type: ignore[assignment, misc]
 
 # Motion (requires RPi.GPIO — will fail on non-Pi machines)
 try:
@@ -199,6 +199,7 @@ _llm: "LlmService | None" = None
 _assistant: "AssistantService | None" = None
 _motion: "MotionService | None" = None
 _tts: "TtsService | None" = None
+_tool_registry = None  # injected by orchestrator via set_tool_registry()
 
 # Rolling amplitude buffer for the live graph
 _AMP_HISTORY_SIZE = 200  # ~20 seconds at 10 Hz
@@ -389,6 +390,17 @@ def reset_services() -> None:
     _available["assistant"] = AssistantService is not None and LlmService is not None
     _available["motion"] = MotionService is not None
     _available["tts"] = TtsService is not None
+
+
+def set_tool_registry(registry) -> None:
+    """
+    Inject the shared ToolRegistry from the orchestrator.
+
+    Called by the orchestrator after tool_registry is built so the web API
+    controls the same registry the assistant is using.
+    """
+    global _tool_registry
+    _tool_registry = registry
 
 
 def set_services(
@@ -670,6 +682,141 @@ def api_motor(command: str):
 
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+# --- Tool management ---
+
+@app.route("/api/tools", methods=["GET"])
+def api_tools_list():
+    """List all registered tools with their current state."""
+    if _tool_registry is None:
+        return jsonify({"tools": []})
+    return jsonify({"tools": _tool_registry.list_all()})
+
+
+@app.route("/api/tools/<name>/enable", methods=["POST"])
+def api_tool_enable(name: str):
+    """Enable a tool so the LLM can see and call it."""
+    if _tool_registry is None:
+        return jsonify({"error": "Tool registry unavailable"}), 503
+    _tool_registry.enable(name)
+    return jsonify({"status": f"{name} enabled"})
+
+
+@app.route("/api/tools/<name>/disable", methods=["POST"])
+def api_tool_disable(name: str):
+    """Disable a tool — hides it from the LLM and blocks execution."""
+    if _tool_registry is None:
+        return jsonify({"error": "Tool registry unavailable"}), 503
+    _tool_registry.disable(name)
+    return jsonify({"status": f"{name} disabled"})
+
+
+@app.route("/api/tools/<name>/run", methods=["POST"])
+def api_tool_run(name: str):
+    """Execute a tool directly, bypassing the LLM."""
+    if _tool_registry is None:
+        return jsonify({"error": "Tool registry unavailable"}), 503
+    if ToolCall is None:
+        return jsonify({"error": "assistant_service not importable"}), 503
+    data = request.get_json(silent=True) or {}
+    args = data.get("args", {})
+    try:
+        call = ToolCall(name=name, args=args)
+        result = _tool_registry.execute(call)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/tools/<name>", methods=["PATCH"])
+def api_tool_update(name: str):
+    """Edit a tool's description or synthesize_result flag."""
+    if _tool_registry is None:
+        return jsonify({"error": "Tool registry unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    if "description" in data:
+        _tool_registry.update_description(name, str(data["description"]))
+    if "synthesize_result" in data:
+        _tool_registry.set_synthesize_result(name, bool(data["synthesize_result"]))
+    return jsonify({"status": "updated"})
+
+
+# --- Memory and conversation history ---
+
+@app.route("/api/memory", methods=["GET"])
+def api_memory():
+    """Return the full assistant memory JSON."""
+    if _assistant is not None:
+        return jsonify(_assistant.memory.data)
+    mem_file = PROJECT_ROOT / "data" / "assistant_memory.json"
+    if mem_file.exists():
+        try:
+            return jsonify(json.loads(mem_file.read_text(encoding="utf-8")))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+    return jsonify({"error": "Memory unavailable"}), 503
+
+
+@app.route("/api/memory/update", methods=["POST"])
+def api_memory_update():
+    """Update a dotted-key path in memory (e.g. profile.user_name)."""
+    if _assistant is None:
+        return jsonify({"error": "Assistant unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("key", "")).strip()
+    value = data.get("value")
+    if not key:
+        return jsonify({"error": "key is required"}), 400
+    _assistant.memory.update_path(key, value)
+    _assistant.memory.save()
+    return jsonify({"status": "updated"})
+
+
+@app.route("/api/memory/facts", methods=["DELETE"])
+def api_memory_clear_facts():
+    """Clear all stored facts from memory."""
+    if _assistant is None:
+        return jsonify({"error": "Assistant unavailable"}), 503
+    _assistant.memory.data["facts"] = []
+    _assistant.memory.save()
+    return jsonify({"status": "facts cleared"})
+
+
+@app.route("/api/memory/history", methods=["GET"])
+def api_memory_history():
+    """Return recent conversation log entries."""
+    n = request.args.get("n", 30, type=int)
+    hist_file = PROJECT_ROOT / "data" / "conversation_log.jsonl"
+    if not hist_file.exists():
+        return jsonify({"turns": []})
+    try:
+        raw = hist_file.read_text(encoding="utf-8").strip()
+        lines = [l for l in raw.split("\n") if l.strip()]
+        recent = lines[-n:]
+        turns = []
+        for line in recent:
+            try:
+                turns.append(json.loads(line))
+            except Exception:
+                pass
+        return jsonify({"turns": turns})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/memory/history", methods=["DELETE"])
+def api_memory_clear_history():
+    """Clear the conversation log file and in-memory history."""
+    hist_file = PROJECT_ROOT / "data" / "conversation_log.jsonl"
+    try:
+        hist_file.parent.mkdir(parents=True, exist_ok=True)
+        hist_file.write_text("", encoding="utf-8")
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    if _assistant is not None:
+        _assistant.history.clear()
+    return jsonify({"status": "history cleared"})
 
 
 # --- Services reset ---

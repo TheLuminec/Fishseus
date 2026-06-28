@@ -59,6 +59,14 @@
             <a class="nav-link" data-section="personality">
                 <span class="nav-icon">🎭</span> Personality
             </a>
+
+            <div class="nav-section-label">Assistant</div>
+            <a class="nav-link" data-section="tools">
+                <span class="nav-icon">🔧</span> Tools
+            </a>
+            <a class="nav-link" data-section="memory">
+                <span class="nav-icon">🧠</span> Memory &amp; Context
+            </a>
         </nav>
     </aside>
 
@@ -503,6 +511,61 @@
                 <div class="btn-group" style="margin-top: 12px;">
                     <button class="btn btn-danger motor-btn" id="fine-estop">⚡ Emergency Stop All</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Tools -->
+        <div class="content-section" id="sec-tools">
+            <div class="section-header">
+                <h2>Tools</h2>
+                <p>Enable or disable tools, edit their descriptions, or run them directly from here.</p>
+            </div>
+            <div class="btn-group" style="margin-bottom: 16px;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-tools">↻ Refresh</button>
+            </div>
+            <div id="tools-list">
+                <p style="color: var(--text-secondary); font-size: 13px;">Loading tools…</p>
+            </div>
+        </div>
+
+        <!-- Memory -->
+        <div class="content-section" id="sec-memory">
+            <div class="section-header">
+                <h2>Memory &amp; Context</h2>
+                <p>Inspect and edit the fish's persistent memory and conversation history.</p>
+            </div>
+
+            <!-- Memory JSON viewer -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">💾</span> Stored Memory</div>
+                <div class="btn-group" style="margin-bottom: 12px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-memory">↻ Refresh</button>
+                    <button class="btn btn-danger btn-sm" id="btn-clear-facts">Clear Facts</button>
+                </div>
+                <pre id="memory-json" style="
+                    background: var(--bg-input, #1e1e2e);
+                    color: var(--text-primary, #cdd6f4);
+                    padding: 14px;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    line-height: 1.6;
+                    overflow-x: auto;
+                    max-height: 380px;
+                    overflow-y: auto;
+                    border: 1px solid var(--border, rgba(255,255,255,0.08));
+                    white-space: pre-wrap;
+                    word-break: break-all;
+                ">Loading…</pre>
+            </div>
+
+            <!-- Conversation history -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📜</span> Conversation History</div>
+                <div class="btn-group" style="margin-bottom: 12px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-history">↻ Refresh</button>
+                    <button class="btn btn-danger btn-sm" id="btn-clear-history">Clear History</button>
+                </div>
+                <div id="history-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto;"></div>
             </div>
         </div>
 
@@ -1270,6 +1333,215 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Audio service unavailable', 'error');
         }
     });
+
+    // =====================================================================
+    // Tools
+    // =====================================================================
+
+    let toolsData = [];
+
+    async function loadTools() {
+        try {
+            const data = await api('GET', '/api/tools');
+            toolsData = data.tools || [];
+            renderTools();
+        } catch (e) {
+            document.getElementById('tools-list').innerHTML =
+                '<p style="color:var(--text-secondary);font-size:13px;">Tools unavailable — registry not injected yet. Start the orchestrator first.</p>';
+        }
+    }
+
+    function renderTools() {
+        const container = document.getElementById('tools-list');
+        if (!toolsData.length) {
+            container.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">No tools registered.</p>';
+            return;
+        }
+
+        container.innerHTML = toolsData.map((t, i) => `
+            <div class="card" style="margin-bottom:12px;" id="tool-card-${i}">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <label class="toggle-label" title="${t.enabled ? 'Enabled' : 'Disabled'}">
+                        <input type="checkbox" class="tool-toggle" data-name="${esc(t.name)}" ${t.enabled ? 'checked' : ''}>
+                        <span class="toggle-track"></span>
+                    </label>
+                    <strong style="font-size:14px;min-width:130px;">${esc(t.name)}</strong>
+                    <span style="font-size:11px;color:var(--text-secondary);flex:1;min-width:180px;">${esc(t.description)}</span>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.returns_data ? 'rgba(34,197,94,.15)' : 'rgba(156,163,175,.12)'};color:${t.returns_data ? '#86efac' : 'var(--text-secondary)'};">data</span>
+                        <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.synthesize_result ? 'rgba(139,92,246,.15)' : 'rgba(156,163,175,.12)'};color:${t.synthesize_result ? '#c4b5fd' : 'var(--text-secondary)'};">synth</span>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="expandTool(${i})">⚙</button>
+                </div>
+                <div id="tool-detail-${i}" style="display:none;margin-top:14px;border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:14px;">
+                    <div class="form-group">
+                        <label>Description</label>
+                        <input type="text" id="tool-desc-${i}" value="${esc(t.description)}" style="font-size:13px;">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="tool-synth-${i}" ${t.synthesize_result ? 'checked' : ''}>
+                            Feed result back to LLM (synthesize_result)
+                        </label>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-primary btn-sm" onclick="saveToolEdit(${i}, '${esc(t.name)}')">Save</button>
+                        <button class="btn btn-secondary btn-sm" onclick="runTool('${esc(t.name)}')">▶ Run</button>
+                    </div>
+                    <div id="tool-run-result-${i}" style="margin-top:10px;font-size:12px;color:var(--text-secondary);display:none;"></div>
+                </div>
+            </div>
+        `).join('');
+
+        // Toggle enable/disable
+        document.querySelectorAll('.tool-toggle').forEach(chk => {
+            chk.addEventListener('change', async () => {
+                const name = chk.dataset.name;
+                const endpoint = chk.checked ? 'enable' : 'disable';
+                try {
+                    const resp = await api('POST', `/api/tools/${encodeURIComponent(name)}/${endpoint}`);
+                    showToast(resp.status || resp.error || 'Updated', chk.checked ? 'success' : 'info');
+                    await loadTools();
+                } catch (e) {
+                    showToast('Failed to update tool', 'error');
+                }
+            });
+        });
+    }
+
+    function expandTool(i) {
+        const detail = document.getElementById('tool-detail-' + i);
+        detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function saveToolEdit(i, name) {
+        const desc = document.getElementById('tool-desc-' + i).value.trim();
+        const synth = document.getElementById('tool-synth-' + i).checked;
+        try {
+            const resp = await api('PATCH', `/api/tools/${encodeURIComponent(name)}`, { description: desc, synthesize_result: synth });
+            showToast(resp.status || resp.error || 'Saved');
+            await loadTools();
+        } catch (e) {
+            showToast('Failed to save tool edit', 'error');
+        }
+    }
+
+    async function runTool(name) {
+        // Find the card index for this tool
+        const idx = toolsData.findIndex(t => t.name === name);
+        const resultEl = idx >= 0 ? document.getElementById('tool-run-result-' + idx) : null;
+        try {
+            const resp = await api('POST', `/api/tools/${encodeURIComponent(name)}/run`, { args: {} });
+            const text = resp.ok ? String(resp.result ?? '(no result)') : (resp.error || 'Error');
+            if (resultEl) {
+                resultEl.style.display = 'block';
+                resultEl.style.color = resp.ok ? '#86efac' : '#f87171';
+                resultEl.textContent = text;
+            }
+            showToast(`${name}: ${text}`, resp.ok ? 'info' : 'error');
+        } catch (e) {
+            showToast('Failed to run tool', 'error');
+        }
+    }
+
+    document.getElementById('btn-refresh-tools').addEventListener('click', loadTools);
+
+    // =====================================================================
+    // Memory & Context
+    // =====================================================================
+
+    async function loadMemory() {
+        const pre = document.getElementById('memory-json');
+        try {
+            const data = await api('GET', '/api/memory');
+            pre.textContent = JSON.stringify(data, null, 2);
+        } catch (e) {
+            pre.textContent = 'Memory unavailable.';
+        }
+    }
+
+    async function loadHistory() {
+        const list = document.getElementById('history-list');
+        try {
+            const data = await api('GET', '/api/memory/history?n=30');
+            const turns = data.turns || [];
+            if (!turns.length) {
+                list.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">No conversation history yet.</p>';
+                return;
+            }
+            list.innerHTML = turns.reverse().map(t => `
+                <div style="
+                    background: var(--bg-input, #1e1e2e);
+                    border: 1px solid var(--border, rgba(255,255,255,.08));
+                    border-radius: 8px;
+                    padding: 12px 14px;
+                    font-size: 12px;
+                    line-height: 1.6;
+                ">
+                    <div style="color:var(--text-secondary);margin-bottom:4px;font-size:11px;">
+                        ${new Date((t.timestamp || 0) * 1000).toLocaleString()} &nbsp;·&nbsp; ${(t.elapsed_s || 0).toFixed(2)}s
+                        ${t.tool_calls && t.tool_calls.length ? ' &nbsp;·&nbsp; tools: ' + t.tool_calls.map(c => esc(c.name)).join(', ') : ''}
+                    </div>
+                    <div style="color:#86efac;margin-bottom:4px;"><strong>You:</strong> ${esc(t.user || '')}</div>
+                    <div style="color:#c4b5fd;"><strong>Fish:</strong> ${esc(t.assistant || '')}</div>
+                </div>
+            `).join('');
+        } catch (e) {
+            list.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">History unavailable.</p>';
+        }
+    }
+
+    document.getElementById('btn-refresh-memory').addEventListener('click', loadMemory);
+    document.getElementById('btn-refresh-history').addEventListener('click', loadHistory);
+
+    document.getElementById('btn-clear-facts').addEventListener('click', async () => {
+        if (!confirm('Clear all stored facts? This cannot be undone.')) return;
+        try {
+            const resp = await api('DELETE', '/api/memory/facts');
+            showToast(resp.status || resp.error || 'Facts cleared');
+            await loadMemory();
+        } catch (e) {
+            showToast('Failed to clear facts', 'error');
+        }
+    });
+
+    document.getElementById('btn-clear-history').addEventListener('click', async () => {
+        if (!confirm('Clear conversation history? This cannot be undone.')) return;
+        try {
+            const resp = await api('DELETE', '/api/memory/history');
+            showToast(resp.status || resp.error || 'History cleared');
+            await loadHistory();
+        } catch (e) {
+            showToast('Failed to clear history', 'error');
+        }
+    });
+
+    // Load tools/memory when switching to those sections
+    const _origSwitch2 = switchSection;
+    switchSection = function(name) {
+        _origSwitch2(name);
+        if (name === 'tools') loadTools();
+        if (name === 'memory') { loadMemory(); loadHistory(); }
+    };
+
+    // Add inline toggle styles
+    const _styleEl = document.createElement('style');
+    _styleEl.textContent = `
+        .toggle-label { display:inline-flex; align-items:center; cursor:pointer; }
+        .toggle-label input[type=checkbox] { display:none; }
+        .toggle-track {
+            width: 38px; height: 20px; border-radius: 10px; position: relative;
+            background: rgba(156,163,175,.25); transition: background .2s;
+        }
+        .toggle-track::after {
+            content:''; position:absolute; top:3px; left:3px;
+            width:14px; height:14px; border-radius:50%;
+            background: #fff; transition: left .2s;
+        }
+        .toggle-label input:checked + .toggle-track { background: #6c63ff; }
+        .toggle-label input:checked + .toggle-track::after { left: 21px; }
+    `;
+    document.head.appendChild(_styleEl);
 
     // =====================================================================
     // Init

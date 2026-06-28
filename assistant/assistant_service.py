@@ -94,6 +94,7 @@ class Tool:
     returns_data: bool = True       # False for fire-and-forget actions (wiggle, open_mouth)
     synthesize_result: bool = False # True = feed result back to LLM for a natural spoken response
                                     # False = speak the raw result directly (good for short values)
+    enabled: bool = True            # False = hidden from LLM prompt and cannot be executed
 
 
 # ----------------------------------------------------------------------
@@ -239,23 +240,20 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def describe_for_prompt(self) -> str:
-        if not self._tools:
-            return "No tools are currently available."
-
-        lines = []
-        for tool in self._tools.values():
-            if tool.risk == "safe":
-                lines.append(f"- {tool.name}: {tool.description}")
-        return "\n".join(lines)
+        lines = [
+            f"- {t.name}: {t.description}"
+            for t in self._tools.values()
+            if t.risk == "safe" and t.enabled
+        ]
+        return "\n".join(lines) if lines else "No tools are currently available."
 
     def execute(self, call: ToolCall) -> dict[str, Any]:
         tool = self._tools.get(call.name)
         if tool is None:
-            return {
-                "tool": call.name,
-                "ok": False,
-                "error": "Unknown tool",
-            }
+            return {"tool": call.name, "ok": False, "error": "Unknown tool"}
+
+        if not tool.enabled:
+            return {"tool": call.name, "ok": False, "error": "Tool is currently disabled"}
 
         if tool.risk != "safe":
             return {
@@ -274,11 +272,40 @@ class ToolRegistry:
                 "synthesize_result": tool.synthesize_result,
             }
         except Exception as exc:
-            return {
-                "tool": call.name,
-                "ok": False,
-                "error": str(exc),
+            return {"tool": call.name, "ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Management helpers (used by web API)
+    # ------------------------------------------------------------------
+
+    def enable(self, name: str) -> None:
+        if name in self._tools:
+            self._tools[name].enabled = True
+
+    def disable(self, name: str) -> None:
+        if name in self._tools:
+            self._tools[name].enabled = False
+
+    def update_description(self, name: str, description: str) -> None:
+        if name in self._tools:
+            self._tools[name].description = description
+
+    def set_synthesize_result(self, name: str, value: bool) -> None:
+        if name in self._tools:
+            self._tools[name].synthesize_result = value
+
+    def list_all(self) -> list[dict]:
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "risk": t.risk,
+                "enabled": t.enabled,
+                "returns_data": t.returns_data,
+                "synthesize_result": t.synthesize_result,
             }
+            for t in self._tools.values()
+        ]
 
 
 # ----------------------------------------------------------------------
