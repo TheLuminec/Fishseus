@@ -1371,7 +1371,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.returns_data ? 'rgba(34,197,94,.15)' : 'rgba(156,163,175,.12)'};color:${t.returns_data ? '#86efac' : 'var(--text-secondary)'};">data</span>
                         <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.synthesize_result ? 'rgba(139,92,246,.15)' : 'rgba(156,163,175,.12)'};color:${t.synthesize_result ? '#c4b5fd' : 'var(--text-secondary)'};">synth</span>
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="expandTool(${i})">⚙</button>
+                    <button class="btn btn-secondary btn-sm tool-expand-btn" data-idx="${i}">⚙</button>
                 </div>
                 <div id="tool-detail-${i}" style="display:none;margin-top:14px;border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:14px;">
                     <div class="form-group">
@@ -1385,8 +1385,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         </label>
                     </div>
                     <div class="btn-group">
-                        <button class="btn btn-primary btn-sm" onclick="saveToolEdit(${i}, '${esc(t.name)}')">Save</button>
-                        <button class="btn btn-secondary btn-sm" onclick="runTool('${esc(t.name)}')">▶ Run</button>
+                        <button class="btn btn-primary btn-sm tool-save-btn" data-idx="${i}" data-name="${esc(t.name)}">Save</button>
+                        <button class="btn btn-secondary btn-sm tool-run-btn" data-idx="${i}" data-name="${esc(t.name)}">▶ Run</button>
                     </div>
                     <div id="tool-run-result-${i}" style="margin-top:10px;font-size:12px;color:var(--text-secondary);display:none;"></div>
                 </div>
@@ -1394,7 +1394,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         // Toggle enable/disable
-        document.querySelectorAll('.tool-toggle').forEach(chk => {
+        container.querySelectorAll('.tool-toggle').forEach(chk => {
             chk.addEventListener('change', async () => {
                 const name = chk.dataset.name;
                 const endpoint = chk.checked ? 'enable' : 'disable';
@@ -1407,41 +1407,51 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
-    }
 
-    function expandTool(i) {
-        const detail = document.getElementById('tool-detail-' + i);
-        detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
-    }
+        // Expand/collapse gear button
+        container.querySelectorAll('.tool-expand-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const i = btn.dataset.idx;
+                const detail = document.getElementById('tool-detail-' + i);
+                detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+            });
+        });
 
-    async function saveToolEdit(i, name) {
-        const desc = document.getElementById('tool-desc-' + i).value.trim();
-        const synth = document.getElementById('tool-synth-' + i).checked;
-        try {
-            const resp = await api('PATCH', `/api/tools/${encodeURIComponent(name)}`, { description: desc, synthesize_result: synth });
-            showToast(resp.status || resp.error || 'Saved');
-            await loadTools();
-        } catch (e) {
-            showToast('Failed to save tool edit', 'error');
-        }
-    }
+        // Save description/synthesize edits
+        container.querySelectorAll('.tool-save-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const i = btn.dataset.idx;
+                const name = btn.dataset.name;
+                const desc = document.getElementById('tool-desc-' + i).value.trim();
+                const synth = document.getElementById('tool-synth-' + i).checked;
+                try {
+                    const resp = await api('PATCH', `/api/tools/${encodeURIComponent(name)}`, { description: desc, synthesize_result: synth });
+                    showToast(resp.status || resp.error || 'Saved');
+                    await loadTools();
+                } catch (e) {
+                    showToast('Failed to save tool edit', 'error');
+                }
+            });
+        });
 
-    async function runTool(name) {
-        // Find the card index for this tool
-        const idx = toolsData.findIndex(t => t.name === name);
-        const resultEl = idx >= 0 ? document.getElementById('tool-run-result-' + idx) : null;
-        try {
-            const resp = await api('POST', `/api/tools/${encodeURIComponent(name)}/run`, { args: {} });
-            const text = resp.ok ? String(resp.result ?? '(no result)') : (resp.error || 'Error');
-            if (resultEl) {
-                resultEl.style.display = 'block';
-                resultEl.style.color = resp.ok ? '#86efac' : '#f87171';
-                resultEl.textContent = text;
-            }
-            showToast(`${name}: ${text}`, resp.ok ? 'info' : 'error');
-        } catch (e) {
-            showToast('Failed to run tool', 'error');
-        }
+        // Run tool directly
+        container.querySelectorAll('.tool-run-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const i = btn.dataset.idx;
+                const name = btn.dataset.name;
+                const resultEl = document.getElementById('tool-run-result-' + i);
+                try {
+                    const resp = await api('POST', `/api/tools/${encodeURIComponent(name)}/run`, { args: {} });
+                    const text = resp.ok ? String(resp.result ?? '(no result)') : (resp.error || 'Error');
+                    resultEl.style.display = 'block';
+                    resultEl.style.color = resp.ok ? '#86efac' : '#f87171';
+                    resultEl.textContent = text;
+                    showToast(`${name}: ${text}`, resp.ok ? 'info' : 'error');
+                } catch (e) {
+                    showToast('Failed to run tool', 'error');
+                }
+            });
+        });
     }
 
     document.getElementById('btn-refresh-tools').addEventListener('click', loadTools);
