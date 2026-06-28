@@ -131,7 +131,6 @@ class MemoryStore:
         self.path.write_text(json.dumps(self.data, indent=2))
 
     def compact_summary(self) -> str:
-        _STANDARD = {"profile", "preferences", "session", "facts"}
         profile = self.data.get("profile", {})
         preferences = self.data.get("preferences", {})
         session = self.data.get("session", {})
@@ -143,25 +142,14 @@ class MemoryStore:
             f"Current mode: {session.get('current_mode', 'assistant')}",
             f"Response style: {preferences.get('response_style', 'brief, helpful, theatrical')}",
             f"Humor level: {preferences.get('humor_level', 'medium')}",
-            f"Personality: {preferences.get('personality', 'dramatic sarcastic fish oracle')}",
         ]
 
-        # Include any extra top-level keys the model chose to store directly.
-        for key, value in self.data.items():
-            if key in _STANDARD:
-                continue
-            if isinstance(value, (str, int, float, bool)):
-                lines.append(f"{key}: {value}")
-            elif isinstance(value, dict):
-                for sub_key, sub_val in value.items():
-                    lines.append(f"{key}.{sub_key}: {sub_val}")
-
-        recent_facts = facts[-6:] if isinstance(facts, list) else []
-        for fact in recent_facts:
-            key = fact.get("key", "fact")
-            value = fact.get("value", "")
-            if value:
-                lines.append(f"Remembered {key}: {value}")
+        if isinstance(facts, list):
+            for fact in facts[-10:]:
+                key = fact.get("key", "fact")
+                value = fact.get("value", "")
+                if value:
+                    lines.append(f"Remembered {key}: {value}")
 
         return "\n".join(f"- {line}" for line in lines)
 
@@ -372,11 +360,25 @@ class AssistantService:
         result = self._assistant_result_from_model(llm_result.content, parsed)
         result.elapsed_s = elapsed
 
-        # Apply model memory updates only when explicit intent was detected.
-        if self._memory_writes_allowed(clean_user_text) and result.memory_updates:
-            for update in result.memory_updates:
-                self._apply_memory_update(update)
-            self.memory.save()
+        # Handle memory writes.
+        memory_intent = self._memory_writes_allowed(clean_user_text)
+        if memory_intent:
+            if result.memory_updates:
+                print(f"[memory] Writing {len(result.memory_updates)} update(s) from model", flush=True)
+                for update in result.memory_updates:
+                    self._apply_memory_update(update)
+                self.memory.save()
+            else:
+                # Model acknowledged intent but wrote nothing — use fallback extraction.
+                print("[memory] ⚠ Memory intent detected but model returned no updates — fallback", flush=True)
+                fallback = self._extract_fact_fallback(clean_user_text)
+                if fallback:
+                    self.memory.add_fact(fallback["key"], fallback["value"])
+                    self.memory.save()
+                    result.memory_updates = [{"key": f"facts.{fallback['key']}", "value": fallback["value"]}]
+                    print(f"[memory] ✓ Fallback stored [{fallback['key']}]: {fallback['value'][:80]}", flush=True)
+                else:
+                    print("[memory] ✗ Fallback could not extract a fact — nothing stored", flush=True)
 
         # Execute safe tools requested by model.
         result.tool_calls = result.tool_calls[: self.config.max_tool_calls]
@@ -607,7 +609,8 @@ Rules:
             return True
         return bool(
             re.search(
-                r"\b(remember that|remember this|from now on|call me|my name is|i prefer|my preference is)\b",
+                r"\b(remember|don't forget|keep in mind|note that|store that|"
+                r"call me|my name is|i prefer|my preference is|from now on)\b",
                 user_text,
                 flags=re.IGNORECASE,
             )
@@ -650,12 +653,45 @@ Rules:
         if not key or value is None:
             return
 
-        # Facts are append-only so we don't overwrite earlier notes.
-        if key.startswith("facts."):
-            fact_key = key.split(".", 1)[1] if "." in key else "note"
-            self.memory.add_fact(fact_key, str(value))
-        else:
+        # Only these structured namespaces get dotted-path storage.
+        _STRUCTURED = ("profile.", "preferences.", "session.")
+        if any(key.startswith(p) for p in _STRUCTURED):
             self.memory.update_path(key, value)
+            print(f"[memory] ✓ Updated {key} = {str(value)[:60]}", flush=True)
+        else:
+            # "facts.X" or bare keys — all go into the facts array.
+            fact_key = key[6:] if key.startswith("facts.") else key
+            self.memory.add_fact(fact_key, str(value))
+            print(f"[memory] ✓ Stored fact [{fact_key}]: {str(value)[:80]}", flush=True)
+
+    def _extract_fact_fallback(self, user_text: str) -> Optional[dict[str, str]]:
+        """
+        Last-resort extraction when the model returned memory_updates: [] despite
+        clear user intent. Pulls the fact text via simple regex patterns.
+        """
+        patterns = [
+            r"\bremember\s+that\s+(.+)",
+            r"\bremember\s+(.+)",
+            r"\bdon't forget\s+(?:that\s+)?(.+)",
+            r"\bkeep in mind\s+(?:that\s+)?(.+)",
+            r"\bnote that\s+(.+)",
+            r"\bstore that\s+(.+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, user_text, flags=re.IGNORECASE)
+            if match:
+                fact = match.group(1).strip(" .,!?")
+                if len(fact) >= 3:
+                    key = re.sub(r"[^a-z0-9]+", "_", fact[:24].lower()).strip("_")
+                    return {"key": key or "note", "value": fact}
+
+        # "call me X" — store as a profile update via the facts fallback
+        match = re.search(r"\bcall me ([A-Za-z0-9_\- ]{1,40})", user_text, flags=re.IGNORECASE)
+        if match:
+            name = match.group(1).strip(" .,!?")
+            return {"key": "user_name", "value": name}
+
+        return None
 
     # ------------------------------------------------------------------
     # History/logging

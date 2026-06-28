@@ -149,7 +149,9 @@ def build_tool_registry(
         asst = get_assistant()
         if asst is None:
             return "Memory not initialised yet"
-        return asst.memory.compact_summary()
+        summary = asst.memory.compact_summary()
+        print(f"[memory] → recall_memory called ({summary.count(chr(10)) + 1} lines)", flush=True)
+        return summary
 
     # ------------------------------------------------------------------
     # Tool table
