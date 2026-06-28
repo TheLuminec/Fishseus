@@ -83,8 +83,8 @@ class Fishseus:
     Production orchestrator.  Owns all service instances and the main loop.
     """
 
-    # seconds of silence after TTS playback before re-enabling the mic
-    POST_SPEECH_COOLDOWN = 1.5
+    POST_SPEECH_COOLDOWN = 1.5   # seconds after TTS before re-enabling mic
+    SESSION_IDLE_TIMEOUT = 3600  # seconds of silence before auto-clearing history (1 hour)
 
     def __init__(self, web_port: int = 8000, enable_web: bool = True) -> None:
         self.web_port = web_port
@@ -93,6 +93,7 @@ class Fishseus:
         self.running = False
         self._speaking = False      # True while TTS is playing (mic suppressed)
         self._speaking_lock = threading.Lock()
+        self._last_interaction: float = 0.0  # monotonic time of last handled command
 
         # Services — populated in initialize()
         self.audio: Optional[AudioService] = None
@@ -240,6 +241,14 @@ class Fishseus:
                 time.sleep(0.05)
                 continue
 
+            # Auto-clear conversation history after prolonged inactivity.
+            if self._last_interaction > 0 and self.assistant is not None:
+                idle_s = time.monotonic() - self._last_interaction
+                if idle_s > self.SESSION_IDLE_TIMEOUT:
+                    _log("session", f"Idle for {idle_s / 3600:.1f}h — auto-clearing conversation history")
+                    self.assistant.clear_history()
+                    self._last_interaction = 0.0
+
             _log("listen", "Waiting for speech…")
             try:
                 wav_path = self.audio.record_until_silence(self._speech_wav)
@@ -266,6 +275,7 @@ class Fishseus:
                 continue
 
             command = stt_result.command_text.strip() or "Hello."
+            self._last_interaction = time.monotonic()
             self._handle_command(command)
 
     # -------------------------------------------------------------------

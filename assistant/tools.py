@@ -145,6 +145,13 @@ def build_tool_registry(
         except Exception as exc:
             return f"Could not reach the weather currents: {exc}"
 
+    def clear_session() -> str:
+        asst = get_assistant()
+        if asst is None:
+            return "assistant not available"
+        asst.clear_history()
+        return "conversation history cleared"
+
     def recall_memory() -> str:
         asst = get_assistant()
         if asst is None:
@@ -168,6 +175,7 @@ def build_tool_registry(
         Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe",  True,         False),
         Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe",  True,         False),
         Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe",  True,         True),
+        Tool("clear_session",    "Clear conversation history for a completely fresh start. No args.",      clear_session,    "safe",  False,        False),
         Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe",  True,         False),
         Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe",  False,        False),
     ]

@@ -693,6 +693,12 @@ Rules:
 
         return None
 
+    def clear_history(self) -> None:
+        """Clear in-memory conversation history. Persistent memory (facts, profile) is unchanged."""
+        count = len(self.history) // 2  # pairs of user/assistant turns
+        self.history.clear()
+        print(f"[session] History cleared ({count} turn(s) removed)", flush=True)
+
     # ------------------------------------------------------------------
     # History/logging
     # ------------------------------------------------------------------
