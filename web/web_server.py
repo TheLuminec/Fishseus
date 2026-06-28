@@ -391,6 +391,39 @@ def reset_services() -> None:
     _available["tts"] = TtsService is not None
 
 
+def set_services(
+    audio=None,
+    llm=None,
+    assistant=None,
+    motion=None,
+    tts=None,
+) -> None:
+    """
+    Inject pre-initialised service instances from an external orchestrator.
+
+    Call this before starting the Flask thread so the web UI controls the
+    same service objects the orchestrator is using.  Any argument left as
+    None is left unchanged.
+    """
+    global _audio, _llm, _assistant, _motion, _tts
+
+    if audio is not None:
+        _audio = audio
+        _available["audio"] = True
+    if llm is not None:
+        _llm = llm
+        _available["llm"] = True
+    if assistant is not None:
+        _assistant = assistant
+        _available["assistant"] = True
+    if motion is not None:
+        _motion = motion
+        _available["motion"] = True
+    if tts is not None:
+        _tts = tts
+        _available["tts"] = True
+
+
 def shutdown_services() -> None:
     """Clean shutdown of services for atexit."""
     if _audio is not None:

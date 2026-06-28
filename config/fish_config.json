@@ -17,7 +17,8 @@
       "fish",
       "fishseus",
       "hey fish"
-    ]
+    ],
+    "strip_wake_word": true
   },
   "llm": {
     "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
