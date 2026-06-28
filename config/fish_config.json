@@ -23,9 +23,9 @@
   "llm": {
     "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
     "model": "qwen2.5:3b",
-    "temperature": 0.7,
-    "max_tokens": 2048,
-    "disable_reasoning": false
+    "temperature": 0.75,
+    "max_tokens": 350,
+    "disable_reasoning": true
   },
   "tts": {
     "piper_binary": "../tts/.venv/bin/piper",

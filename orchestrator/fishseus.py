@@ -34,12 +34,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import random
 import signal
 import sys
 import threading
 import time
-from dataclasses import dataclass
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -286,21 +289,40 @@ class Fishseus:
 
         _log("assistant", f"speak='{result.speak}'  motion={result.motion}  tools={[c.name for c in result.tool_calls]}  elapsed={result.elapsed_s:.2f}s")
 
-        self._speak_with_motion(result.speak, result.motion)
+        # Collect any data that tools returned which should be spoken aloud.
+        data_snippets = [
+            str(r["result"])
+            for r in result.tool_results
+            if r.get("ok") and r.get("returns_data") and r.get("result")
+        ]
+
+        if data_snippets:
+            # Phase 1: speak the model's "thinking" placeholder — no cooldown so the
+            # data follows immediately without a 1.5s gap.
+            self._speak_with_motion(result.speak, result.motion, cooldown=False)
+            # Phase 2: speak the actual tool data, then apply the normal cooldown.
+            self._speak_with_motion(" ".join(data_snippets), "speaking", cooldown=True)
+        else:
+            self._speak_with_motion(result.speak, result.motion, cooldown=True)
 
     # -------------------------------------------------------------------
     # Speaking (mic suppression + TTS + motion)
     # -------------------------------------------------------------------
 
-    def _speak_with_motion(self, text: str, motion_hint: str) -> None:
+    def _speak_with_motion(self, text: str, motion_hint: str, *, cooldown: bool = True) -> None:
         assert self.tts is not None
         assert self.motion is not None
         assert self.audio is not None
 
         # Suppress mic so the fish can't hear itself.
+        # Only acquire suppression on the first phase (mic may already be stopped).
+        already_suppressed: bool
         with self._speaking_lock:
+            already_suppressed = self._speaking
             self._speaking = True
-        self.audio.stop_capture()
+
+        if not already_suppressed:
+            self.audio.stop_capture()
 
         try:
             _log("tts", "Synthesising response…")
@@ -311,12 +333,9 @@ class Fishseus:
                 self.motion.speak_text_placeholder(duration_s=1.5)
                 return
 
-            # Pre-speech reaction based on emotion hint.
             self._pre_speech_reaction(motion_hint)
 
-            # Start mouth animation and audio playback at the same time.
-            # speak_audio() is non-blocking (queues work to the motion thread).
-            # play_wav() blocks until the audio finishes.
+            # speak_audio() is non-blocking; play_wav() blocks until done.
             _log("tts", f"Playing {tts_wav}…")
             self.motion.speak_audio(tts_wav)
             try:
@@ -324,14 +343,15 @@ class Fishseus:
             except Exception as exc:
                 _log("tts", f"Playback failed: {exc}")
 
-            # Wait for room echo to die down before re-enabling the mic.
-            time.sleep(self.POST_SPEECH_COOLDOWN)
+            if cooldown:
+                # Let room echo die before re-enabling the mic.
+                time.sleep(self.POST_SPEECH_COOLDOWN)
 
         finally:
-            # Always re-enable the mic, even if TTS or playback crashed.
-            self.audio.start_capture(amplitude_callback=self._on_amplitude)
-            with self._speaking_lock:
-                self._speaking = False
+            if cooldown:
+                self.audio.start_capture(amplitude_callback=self._on_amplitude)
+                with self._speaking_lock:
+                    self._speaking = False
 
     def _pre_speech_reaction(self, motion_hint: str) -> None:
         if motion_hint in {"happy", "excited"}:
@@ -406,7 +426,82 @@ class Fishseus:
             return f"mode switch requested: {mode}"
 
         def get_current_time() -> str:
-            return time.strftime("%Y-%m-%d %H:%M:%S")
+            return time.strftime("%I:%M %p")
+
+        def get_date() -> str:
+            return time.strftime("%A, %B %d, %Y")
+
+        def get_weather(location: str = "") -> str:
+            try:
+                encoded = urllib.parse.quote(location.strip())
+                url = (
+                    f"https://wttr.in/{encoded}?format=%l:+%C,+%t"
+                    if encoded else
+                    "https://wttr.in/?format=%l:+%C,+%t"
+                )
+                req = urllib.request.Request(url, headers={"User-Agent": "Fishseus/1.0"})
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    text = resp.read().decode("utf-8", errors="ignore").strip()
+                # Strip non-ASCII so TTS doesn't choke on degree symbols etc.
+                text = text.encode("ascii", "ignore").decode().strip()
+                return text or "Weather data unavailable"
+            except Exception as exc:
+                return f"Could not reach the weather currents: {exc}"
+
+        def flip_coin() -> str:
+            return random.choice(["heads", "tails"])
+
+        def roll_dice(sides: int = 6, count: int = 1) -> str:
+            sides = max(2, min(int(sides), 100))
+            count = max(1, min(int(count), 10))
+            rolls = [random.randint(1, sides) for _ in range(count)]
+            if count == 1:
+                return str(rolls[0])
+            total = sum(rolls)
+            roll_str = ", ".join(str(r) for r in rolls)
+            return f"{roll_str}, total {total}"
+
+        def calculate(expression: str) -> str:
+            _SAFE_NODES = {
+                ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+                ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
+                ast.Mod, ast.Pow, ast.USub, ast.UAdd,
+            }
+            try:
+                tree = ast.parse(expression.strip(), mode="eval")
+                for node in ast.walk(tree):
+                    if type(node) not in _SAFE_NODES:
+                        return "Only basic arithmetic is supported"
+                result = eval(compile(tree, "<expr>", "eval"))  # noqa: S307 — guarded above
+                if isinstance(result, float):
+                    return str(int(result)) if result.is_integer() else f"{result:.6g}"
+                return str(result)
+            except ZeroDivisionError:
+                return "Division by zero — even the ocean has limits"
+            except Exception:
+                return "Could not parse that expression"
+
+        def recall_memory() -> str:
+            if self.assistant is None:
+                return "Memory not initialised yet"
+            mem = self.assistant.memory
+            profile = mem.data.get("profile", {})
+            prefs   = mem.data.get("preferences", {})
+            facts   = mem.data.get("facts", [])
+
+            parts: list[str] = []
+            name = profile.get("user_name", "")
+            if name and name.lower() not in {"user", ""}:
+                parts.append(f"Your name is {name}.")
+            style = prefs.get("response_style", "")
+            if style:
+                parts.append(f"You prefer {style}.")
+            for fact in facts[-3:]:
+                val = str(fact.get("value", "")).strip()
+                if val:
+                    parts.append(val if val.endswith(".") else val + ".")
+
+            return " ".join(parts) if parts else "The depths hold no records of you yet."
 
         def list_voices() -> str:
             voices = self.tts.available_voices()
@@ -416,13 +511,21 @@ class Fishseus:
             self.tts.set_voice(voice)
             return f"voice set to {voice}"
 
+        # returns_data=False → fire-and-forget, result is never spoken aloud
+        # returns_data=True  → result is spoken after the thinking placeholder
         tools = [
-            Tool("wiggle",           "Make the fish wiggle. Args: cycles int 1-5.", wiggle,       "safe"),
-            Tool("open_mouth",       "Open the fish mouth once. No args.",           open_mouth,   "safe"),
-            Tool("set_mode",         "Request mode switch. Args: mode 'assistant' or 'bluetooth'.", set_mode, "safe"),
-            Tool("get_current_time", "Get the current system time. No args.",        get_current_time, "safe"),
-            Tool("list_voices",      "List available Piper TTS voices. No args.",    list_voices,  "safe"),
-            Tool("set_voice",        "Set the TTS voice. Args: voice name string.",  set_voice,    "safe"),
+            Tool("wiggle",           "Make the fish wiggle. Args: cycles int 1-5.",                           wiggle,           "safe", returns_data=False),
+            Tool("open_mouth",       "Open the fish mouth once. No args.",                                    open_mouth,       "safe", returns_data=False),
+            Tool("set_mode",         "Request a mode switch. Args: mode — 'assistant' or 'bluetooth'.",       set_mode,         "safe", returns_data=False),
+            Tool("get_current_time", "Get the current clock time. No args.",                                  get_current_time, "safe", returns_data=True),
+            Tool("get_date",         "Get today's full date. No args.",                                       get_date,         "safe", returns_data=True),
+            Tool("get_weather",      "Get current weather. Args: location string (city or empty for local).", get_weather,      "safe", returns_data=True),
+            Tool("flip_coin",        "Flip a coin. Returns heads or tails. No args.",                         flip_coin,        "safe", returns_data=True),
+            Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe", returns_data=True),
+            Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe", returns_data=True),
+            Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe", returns_data=True),
+            Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe", returns_data=True),
+            Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe", returns_data=False),
         ]
         for t in tools:
             registry.register(t)

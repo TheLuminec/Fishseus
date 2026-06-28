@@ -90,7 +90,8 @@ class Tool:
     name: str
     description: str
     function: Callable[..., Any]
-    risk: str = "safe"  # safe | confirm | blocked
+    risk: str = "safe"          # safe | confirm | blocked
+    returns_data: bool = True   # False for fire-and-forget actions (wiggle, open_mouth)
 
 
 # ----------------------------------------------------------------------
@@ -267,6 +268,7 @@ class ToolRegistry:
                 "tool": call.name,
                 "ok": True,
                 "result": result,
+                "returns_data": tool.returns_data,
             }
         except Exception as exc:
             return {
@@ -362,11 +364,16 @@ class AssistantService:
     # Prompt building
     # ------------------------------------------------------------------
     def _build_messages(self, user_text: str) -> list[dict[str, str]]:
+        # Merge into a single system message — small models handle one block better
+        # than three separate system entries.
+        system = "\n\n".join([
+            self._personality_prompt(),
+            self._memory_prompt(),
+            self._tool_prompt(),
+        ])
         return [
-            {"role": "system", "content": self._personality_prompt()},
-            {"role": "system", "content": self._memory_prompt()},
-            {"role": "system", "content": self._tool_prompt()},
-            *self.history[-self.config.max_history_turns :],
+            {"role": "system", "content": system},
+            *self.history[-self.config.max_history_turns * 2 :],
             {"role": "user", "content": user_text},
         ]
 
