@@ -350,11 +350,6 @@ class AssistantService:
         clean_user_text = self._clean_user_text(user_text)
         self.memory.update_path("session.last_command", clean_user_text)
 
-        # Deterministic local memory capture before the LLM call.
-        local_memory_updates = self._detect_explicit_memory_updates(clean_user_text)
-        for update in local_memory_updates:
-            self._apply_memory_update(update)
-
         messages = self._build_messages(clean_user_text)
 
         start = time.monotonic()
@@ -363,8 +358,6 @@ class AssistantService:
                 messages,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
-                # Ollama may or may not support this. If unsupported, it is
-                # ignored or can be removed in llm_service.py config.
                 response_format={"type": "json_object"},
             )
             elapsed = time.monotonic() - start
@@ -379,18 +372,10 @@ class AssistantService:
         result = self._assistant_result_from_model(llm_result.content, parsed)
         result.elapsed_s = elapsed
 
-        # Capture model-only suggestions before merging so we don't re-apply
-        # the local updates (which were already written above).
-        model_only_updates = list(result.memory_updates)
-        result.memory_updates = [*local_memory_updates, *model_only_updates]
-
-        # Apply model-suggested updates only when explicit memory intent exists.
-        if self._memory_writes_allowed(clean_user_text):
-            for update in model_only_updates:
+        # Apply model memory updates only when explicit intent was detected.
+        if self._memory_writes_allowed(clean_user_text) and result.memory_updates:
+            for update in result.memory_updates:
                 self._apply_memory_update(update)
-            self.memory.save()
-        elif local_memory_updates:
-            # Local detector already applied — just persist.
             self.memory.save()
 
         # Execute safe tools requested by model.
