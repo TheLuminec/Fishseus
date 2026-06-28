@@ -304,7 +304,7 @@ class SttService:
         if cfg.no_timestamps:
             cmd.append("-nt")
 
-        if not cfg.print_special:
+        if cfg.print_special:
             cmd.append("-ps")
 
         if not cfg.print_progress:
@@ -339,6 +339,8 @@ class SttService:
             lines.append(line)
 
         text = " ".join(lines)
+        # Strip Whisper special tokens (<|endoftext|>, <|notimestamps|>, etc.)
+        text = re.sub(r"<\|[^|]*\|>", "", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
 

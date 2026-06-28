@@ -131,6 +131,7 @@ class MemoryStore:
         self.path.write_text(json.dumps(self.data, indent=2))
 
     def compact_summary(self) -> str:
+        _STANDARD = {"profile", "preferences", "session", "facts"}
         profile = self.data.get("profile", {})
         preferences = self.data.get("preferences", {})
         session = self.data.get("session", {})
@@ -144,6 +145,16 @@ class MemoryStore:
             f"Humor level: {preferences.get('humor_level', 'medium')}",
             f"Personality: {preferences.get('personality', 'dramatic sarcastic fish oracle')}",
         ]
+
+        # Include any extra top-level keys the model chose to store directly.
+        for key, value in self.data.items():
+            if key in _STANDARD:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                lines.append(f"{key}: {value}")
+            elif isinstance(value, dict):
+                for sub_key, sub_val in value.items():
+                    lines.append(f"{key}.{sub_key}: {sub_val}")
 
         recent_facts = facts[-6:] if isinstance(facts, list) else []
         for fact in recent_facts:
@@ -598,9 +609,9 @@ Rules:
     @staticmethod
     def _fallback_speak(raw_text: str) -> str:
         text = raw_text.strip()
-        if not text:
+        # Don't speak raw JSON structures — they crash TTS and mean nothing aloud.
+        if not text or text.startswith("{") or text.startswith("["):
             return "My thoughts got tangled in the kelp. Try that again."
-        # If JSON parsing failed, speak a trimmed raw response rather than dying.
         return text[:300]
 
     # ------------------------------------------------------------------

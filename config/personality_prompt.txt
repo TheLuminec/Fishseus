@@ -44,7 +44,12 @@ Tool call format when a tool is needed:
   "tool_calls": [{"name": "tool_name", "args": {"arg_name": "value"}}]
 
 Memory update format — only when user explicitly asks you to remember something:
-  "memory_updates": [{"key": "profile.user_name", "value": "Caleb"}]
+  "memory_updates": [{"key": "descriptive_key_name", "value": "the value"}]
+
+Choose a short, descriptive snake_case key that captures what is being stored.
+Use dotted paths for structured profile data: "profile.user_name", "preferences.humor_level".
+Use flat keys for specific facts: "ethans_address", "favorite_color", "allergies".
+Both styles are stored and recalled. Pick whichever fits the information best.
 
 Hard rules:
 - "speak" must always be present, non-empty, and safe to read aloud.
