@@ -119,8 +119,8 @@ class MotionService:
     def open_mouth(self, duration: Optional[float] = None, speed: Optional[float] = None) -> None:
         self._enqueue("open_mouth", {"duration": duration, "speed": speed})
 
-    def wiggle(self, cycles: int = 2, tail: bool = True, body: bool = True) -> None:
-        self._enqueue("wiggle", {"cycles": cycles, "tail": tail, "body": body})
+    def wiggle(self, cycles: int = 2, tail: bool = True, body: bool = True, speed_scale: float = 1.0) -> None:
+        self._enqueue("wiggle", {"cycles": cycles, "tail": tail, "body": body, "speed_scale": speed_scale})
 
     def speak_audio(self, wav_path: str | Path) -> None:
         self._enqueue("speak_audio", {"wav_path": str(wav_path)})
@@ -239,16 +239,16 @@ class MotionService:
         self._sleep_with_cancel(open_time)
         self._soft_return_to_neutral(motor_name, self.mouth_close_time)
 
-    def _do_wiggle(self, cycles: int, tail: bool, body: bool) -> None:
+    def _do_wiggle(self, cycles: int, tail: bool, body: bool, speed_scale: float = 1.0) -> None:
         for _ in range(max(1, cycles)):
             if self._cancel_motion.is_set():
                 return
 
             if tail:
-                self._pulse_motor("tail", self.tail_wiggle_time)
+                self._pulse_motor("tail", self.tail_wiggle_time, speed_scale)
 
             if body:
-                self._pulse_motor("body", self.body_wiggle_time)
+                self._pulse_motor("body", self.body_wiggle_time, speed_scale)
 
     def _do_speak_placeholder(self, duration_s: float) -> None:
         start = time.monotonic()
@@ -292,12 +292,13 @@ class MotionService:
     # ---------------------------------------------------------------------
     # Low-level motion helpers
     # ---------------------------------------------------------------------
-    def _pulse_motor(self, motor_name: str, forward_time: float) -> None:
+    def _pulse_motor(self, motor_name: str, forward_time: float, speed_scale: float = 1.0) -> None:
         if self._cancel_motion.is_set():
             return
 
         cfg = self.motors[motor_name]
-        self._drive_forward(motor_name, cfg.forward_speed)
+        speed = max(0.0, min(100.0, cfg.forward_speed * speed_scale))
+        self._drive_forward(motor_name, speed)
         self._sleep_with_cancel(forward_time)
         self._soft_return_to_neutral(motor_name, cfg.neutral_return_time)
 

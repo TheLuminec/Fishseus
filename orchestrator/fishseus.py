@@ -277,8 +277,9 @@ class Fishseus:
 
         _log("assistant", f"Command: '{command}'")
 
-        # Immediate acknowledgement wiggle while LLM thinks.
-        self.motion.wiggle(cycles=1)
+        # Soft acknowledgement wiggle while LLM thinks (75% speed — less startling
+        # than a full-power wiggle for every single command).
+        self.motion.wiggle(cycles=1, speed_scale=0.75)
 
         try:
             result = self.assistant.handle_user_text(command)
@@ -289,19 +290,28 @@ class Fishseus:
 
         _log("assistant", f"speak='{result.speak}'  motion={result.motion}  tools={[c.name for c in result.tool_calls]}  elapsed={result.elapsed_s:.2f}s")
 
-        # Collect any data that tools returned which should be spoken aloud.
-        data_snippets = [
+        # Partition tool results by how their data should be delivered.
+        raw_snippets = [
             str(r["result"])
             for r in result.tool_results
-            if r.get("ok") and r.get("returns_data") and r.get("result")
+            if r.get("ok") and r.get("returns_data") and not r.get("synthesize_result")
+            and r.get("result") is not None
+        ]
+        synth_results = [
+            r for r in result.tool_results
+            if r.get("ok") and r.get("synthesize_result") and r.get("result") is not None
         ]
 
-        if data_snippets:
-            # Phase 1: speak the model's "thinking" placeholder — no cooldown so the
-            # data follows immediately without a 1.5s gap.
+        if synth_results:
+            # Speak the thinking placeholder first (no cooldown gap).
             self._speak_with_motion(result.speak, result.motion, cooldown=False)
-            # Phase 2: speak the actual tool data, then apply the normal cooldown.
-            self._speak_with_motion(" ".join(data_snippets), "speaking", cooldown=True)
+            # Ask the LLM to formulate a natural spoken response from the returned data.
+            synthesized = self.assistant.formulate_tool_response(command, synth_results)
+            self._speak_with_motion(synthesized, "speaking", cooldown=True)
+        elif raw_snippets:
+            # Two-phase: thinking placeholder then speak the raw value directly.
+            self._speak_with_motion(result.speak, result.motion, cooldown=False)
+            self._speak_with_motion(" ".join(raw_snippets), "speaking", cooldown=True)
         else:
             self._speak_with_motion(result.speak, result.motion, cooldown=True)
 
@@ -484,24 +494,8 @@ class Fishseus:
         def recall_memory() -> str:
             if self.assistant is None:
                 return "Memory not initialised yet"
-            mem = self.assistant.memory
-            profile = mem.data.get("profile", {})
-            prefs   = mem.data.get("preferences", {})
-            facts   = mem.data.get("facts", [])
-
-            parts: list[str] = []
-            name = profile.get("user_name", "")
-            if name and name.lower() not in {"user", ""}:
-                parts.append(f"Your name is {name}.")
-            style = prefs.get("response_style", "")
-            if style:
-                parts.append(f"You prefer {style}.")
-            for fact in facts[-3:]:
-                val = str(fact.get("value", "")).strip()
-                if val:
-                    parts.append(val if val.endswith(".") else val + ".")
-
-            return " ".join(parts) if parts else "The depths hold no records of you yet."
+            # Return raw summary — formulate_tool_response will turn it into natural speech.
+            return self.assistant.memory.compact_summary()
 
         def list_voices() -> str:
             voices = self.tts.available_voices()
@@ -511,21 +505,23 @@ class Fishseus:
             self.tts.set_voice(voice)
             return f"voice set to {voice}"
 
-        # returns_data=False → fire-and-forget, result is never spoken aloud
-        # returns_data=True  → result is spoken after the thinking placeholder
+        # returns_data=False     → fire-and-forget, result never spoken
+        # returns_data=True,
+        #   synthesize_result=False → speak raw result directly (short values: time, dice, math)
+        #   synthesize_result=True  → feed result back to LLM for a natural spoken response
         tools = [
-            Tool("wiggle",           "Make the fish wiggle. Args: cycles int 1-5.",                           wiggle,           "safe", returns_data=False),
-            Tool("open_mouth",       "Open the fish mouth once. No args.",                                    open_mouth,       "safe", returns_data=False),
-            Tool("set_mode",         "Request a mode switch. Args: mode — 'assistant' or 'bluetooth'.",       set_mode,         "safe", returns_data=False),
-            Tool("get_current_time", "Get the current clock time. No args.",                                  get_current_time, "safe", returns_data=True),
-            Tool("get_date",         "Get today's full date. No args.",                                       get_date,         "safe", returns_data=True),
-            Tool("get_weather",      "Get current weather. Args: location string (city or empty for local).", get_weather,      "safe", returns_data=True),
-            Tool("flip_coin",        "Flip a coin. Returns heads or tails. No args.",                         flip_coin,        "safe", returns_data=True),
-            Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe", returns_data=True),
-            Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe", returns_data=True),
-            Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe", returns_data=True),
-            Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe", returns_data=True),
-            Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe", returns_data=False),
+            Tool("wiggle",           "Make the fish wiggle. Args: cycles int 1-5.",                           wiggle,           "safe", returns_data=False, synthesize_result=False),
+            Tool("open_mouth",       "Open the fish mouth once. No args.",                                    open_mouth,       "safe", returns_data=False, synthesize_result=False),
+            Tool("set_mode",         "Request a mode switch. Args: mode — 'assistant' or 'bluetooth'.",       set_mode,         "safe", returns_data=False, synthesize_result=False),
+            Tool("get_current_time", "Get the current clock time. No args.",                                  get_current_time, "safe", returns_data=True,  synthesize_result=False),
+            Tool("get_date",         "Get today's full date. No args.",                                       get_date,         "safe", returns_data=True,  synthesize_result=False),
+            Tool("get_weather",      "Get current weather. Args: location string (city or empty for local).", get_weather,      "safe", returns_data=True,  synthesize_result=True),
+            Tool("flip_coin",        "Flip a coin. Returns heads or tails. No args.",                         flip_coin,        "safe", returns_data=True,  synthesize_result=False),
+            Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe", returns_data=True,  synthesize_result=False),
+            Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe", returns_data=True,  synthesize_result=False),
+            Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe", returns_data=True,  synthesize_result=True),
+            Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe", returns_data=True,  synthesize_result=False),
+            Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe", returns_data=False, synthesize_result=False),
         ]
         for t in tools:
             registry.register(t)

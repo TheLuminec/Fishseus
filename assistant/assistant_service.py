@@ -90,8 +90,10 @@ class Tool:
     name: str
     description: str
     function: Callable[..., Any]
-    risk: str = "safe"          # safe | confirm | blocked
-    returns_data: bool = True   # False for fire-and-forget actions (wiggle, open_mouth)
+    risk: str = "safe"              # safe | confirm | blocked
+    returns_data: bool = True       # False for fire-and-forget actions (wiggle, open_mouth)
+    synthesize_result: bool = False # True = feed result back to LLM for a natural spoken response
+                                    # False = speak the raw result directly (good for short values)
 
 
 # ----------------------------------------------------------------------
@@ -269,6 +271,7 @@ class ToolRegistry:
                 "ok": True,
                 "result": result,
                 "returns_data": tool.returns_data,
+                "synthesize_result": tool.synthesize_result,
             }
         except Exception as exc:
             return {
@@ -359,6 +362,57 @@ class AssistantService:
         self._log_turn(clean_user_text, result)
 
         return result
+
+    def formulate_tool_response(
+        self,
+        user_text: str,
+        tool_results: list[dict[str, Any]],
+    ) -> str:
+        """
+        Second-turn LLM call: given what the user asked and the data returned
+        by synthesize_result tools, generate a natural spoken Fishseus response.
+
+        Returns the spoken text string (not a full AssistantResult — this is a
+        lightweight follow-up, not a full assistant turn).
+        """
+        results_text = "\n".join(
+            f"{r['tool']}: {r['result']}"
+            for r in tool_results
+            if r.get("ok") and r.get("result") is not None
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "\n\n".join([
+                    self.personality_prompt,
+                    self._memory_prompt(),
+                ]),
+            },
+            {"role": "user", "content": user_text},
+            {
+                "role": "user",
+                "content": (
+                    f"Your tools returned this data:\n{results_text}\n\n"
+                    "Give your final spoken response incorporating this data. "
+                    'Reply as valid JSON with only "speak" and "motion" fields.'
+                ),
+            },
+        ]
+        try:
+            llm_result = self.llm.chat(
+                messages,
+                temperature=self.config.temperature,
+                max_tokens=200,
+            )
+            parsed = llm_result.parse_json_content()
+            if parsed and parsed.get("speak"):
+                return str(parsed["speak"]).strip()
+            # Fallback: clean up raw content if JSON parse failed
+            content = llm_result.content.strip()
+            return content[:300] if content else results_text
+        except Exception as exc:
+            print(f"[AssistantService] formulate_tool_response failed: {exc}")
+            return results_text  # speak the raw data rather than going silent
 
     # ------------------------------------------------------------------
     # Prompt building
