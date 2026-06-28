@@ -3,10 +3,10 @@
     "device": "plughw:3,0",
     "sample_rate": 16000,
     "channels": 1,
-    "speech_threshold": 0.003,
-    "silence_threshold": 0.0008,
-    "silence_timeout_s": 1.0,
-    "max_record_seconds": 12.0,
+    "speech_threshold": 0.016,
+    "silence_threshold": 0.008,
+    "silence_timeout_s": 1,
+    "max_record_seconds": 12,
     "pre_roll_seconds": 0.4
   },
   "stt": {
@@ -24,8 +24,8 @@
     "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
     "model": "qwen2.5:3b",
     "temperature": 0.7,
-    "max_tokens": 512,
-    "disable_reasoning": true
+    "max_tokens": 2048,
+    "disable_reasoning": false
   },
   "tts": {
     "piper_binary": "../tts/.venv/bin/piper",
