@@ -1,6 +1,7 @@
 {
   "profile": {
-    "assistant_name": "Fishseus"
+    "assistant_name": "Fishseus",
+    "user_name": "Caleb"
   },
   "preferences": {
     "response_style": "brief, helpful, technical when needed",
@@ -10,13 +11,18 @@
   "session": {
     "current_mode": "assistant",
     "last_topic": null,
-    "last_command": null
+    "last_command": "Hey Remember that Ethan Weber lives at 5450 Lockwood Rd. Madison, Ohio 44057."
   },
   "facts": [
     {
-      "key": "project",
-      "value": "The user is building a Raspberry Pi 5 powered Billy Bass assistant named Fishseus.",
-      "created_at": 1778363545
+      "key": "current_location",
+      "value": "Oxford, Ohio",
+      "created_at": 1782681531
+    },
+    {
+      "key": "ethan_address",
+      "value": "5450 Lockwood Rd. Madison, Ohio 44057",
+      "created_at": 1782681559
     }
   ]
 }
