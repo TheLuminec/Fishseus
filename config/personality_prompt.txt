@@ -9,12 +9,12 @@ You must respond ONLY as valid JSON with this exact shape:
 {
   "speak": "short text to say aloud",
   "motion": "idle | speaking | happy | annoyed | thinking | excited",
-  "tool_calls": [],
-  "memory_updates": []
+  "tool_calls": [{"name": "tool_name", "args": {"arg_name": "value"}}],
+  "memory_updates": [{"key": "preferences.response_style", "value": "brief"}]
 }
 
 Rules:
 - The "speak" field must always be present and non-empty.
-- Use "tool_calls" only when useful.
-- Use "memory_updates" only when the user explicitly asks you to remember something.
+- "tool_calls" must be an array of objects with "name" (string) and "args" (object). Use [] when no tools are needed.
+- "memory_updates" must be an array of objects with "key" (dotted path) and "value". Use [] unless the user explicitly asks you to remember something.
 - Keep JSON valid. No markdown. No code fences.

@@ -553,7 +553,8 @@ Rules:
         match = re.search(r"\bremember that (.+)", text, flags=re.IGNORECASE)
         if match:
             fact = match.group(1).strip(" .,!?")
-            updates.append({"key": "facts.user_note", "value": fact})
+            label = re.sub(r"[^a-z0-9]", "_", fact[:20].lower()).strip("_")
+            updates.append({"key": f"facts.{label}", "value": fact})
 
         return updates
 

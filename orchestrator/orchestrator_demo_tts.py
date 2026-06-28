@@ -178,7 +178,7 @@ class FishseusTtsDemoOrchestrator:
                 model_path=str((config_dir / stt_cfg.get("model_path", "../stt/whisper.cpp/models/ggml-base.en.bin")).resolve()),
                 threads=stt_cfg.get("threads", cfg.whisper_threads),
                 wake_words=stt_cfg.get("wake_words", list(cfg.wake_words)),
-                strip_wake_word=False,
+                strip_wake_word=True,
             )
         )
         self.stt.initialize()
