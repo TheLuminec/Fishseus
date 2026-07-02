@@ -72,5 +72,18 @@
     "assistant_name": "Fishseus",
     "user_name": "User",
     "personality_path": "../config/personality_prompt.txt"
+  },
+  "vision": {
+    "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
+    "model": "qwen2.5vl:3b",
+    "timeout_s": 60,
+    "max_tokens": 300,
+    "default_camera": "front",
+    "cameras": {}
+  },
+  "sensors": {
+    "enabled": false,
+    "poll_interval_s": 0.05,
+    "sensors": []
   }
 }

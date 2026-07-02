@@ -40,6 +40,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Optional
 
 # -----------------------------------------------------------------------
@@ -48,7 +49,7 @@ from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "web"):
+for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "web", "vision", "sensors"):
     _candidate = PROJECT_ROOT / _subdir
     if _candidate.exists() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
@@ -59,6 +60,8 @@ from llm_service import LlmConfig, LlmService
 from assistant_service import AssistantConfig, AssistantService
 from motion_service import MotionService, MotorConfig
 from tts_service import TtsConfig, TtsService
+from vision_service import VisionConfig, VisionService
+from sensor_service import SensorConfig, SensorService, SensorEvent
 from tools import build_tool_registry
 
 
@@ -102,6 +105,11 @@ class Fishseus:
         self.assistant: Optional[AssistantService] = None
         self.motion: Optional[MotionService] = None
         self.tts: Optional[TtsService] = None
+        self.vision: Optional[VisionService] = None
+        self.sensors: Optional[SensorService] = None
+
+        # Sensor events queued by the watcher thread, consumed by run().
+        self._event_queue: "Queue[SensorEvent]" = Queue()
 
         self._speech_wav = PROJECT_ROOT / "tmp" / "latest_speech.wav"
 
@@ -124,6 +132,8 @@ class Fishseus:
         tts_cfg     = app_config.get("tts", {})
         motion_cfg  = app_config.get("motion", {})
         asst_cfg    = app_config.get("assistant", {})
+        vision_cfg  = app_config.get("vision", {})
+        sensors_cfg = app_config.get("sensors", {})
 
         self._speech_wav.parent.mkdir(parents=True, exist_ok=True)
 
@@ -195,12 +205,50 @@ class Fishseus:
         self.motion = self._build_motion_service(motion_cfg)
         self.motion.initialize()
 
+        # Vision (optional — degrades gracefully if no cameras configured)
+        if vision_cfg.get("cameras"):
+            _log("init", "Starting vision service…")
+            try:
+                self.vision = VisionService(VisionConfig(
+                    endpoint_url   = vision_cfg.get("endpoint_url", llm_cfg.get("endpoint_url", "")),
+                    model          = vision_cfg.get("model", "qwen2.5vl:3b"),
+                    timeout_s      = float(vision_cfg.get("timeout_s", 60.0)),
+                    max_tokens     = int(vision_cfg.get("max_tokens", 300)),
+                    capture_dir    = PROJECT_ROOT / "tmp" / "vision",
+                    cameras        = vision_cfg.get("cameras", {}),
+                    default_camera = vision_cfg.get("default_camera", ""),
+                ))
+                _log("init", f"Vision cameras: {self.vision.available_cameras()}")
+            except Exception as exc:
+                _log("init", f"Vision service failed to start: {exc}")
+                self.vision = None
+        else:
+            _log("init", "No cameras configured — vision disabled")
+
+        # Sensors (optional — degrades gracefully without RPi.GPIO or config)
+        if sensors_cfg.get("enabled", False) and sensors_cfg.get("sensors"):
+            _log("init", "Starting sensor service…")
+            try:
+                self.sensors = SensorService(SensorConfig(
+                    poll_interval_s = float(sensors_cfg.get("poll_interval_s", 0.05)),
+                    sensors         = sensors_cfg.get("sensors", []),
+                ))
+                self.sensors.set_callback(self._on_sensor_event)
+                self.sensors.initialize()
+            except Exception as exc:
+                _log("init", f"Sensor service failed to start: {exc}")
+                self.sensors = None
+        else:
+            _log("init", "Sensors disabled")
+
         # Assistant
         _log("init", "Starting assistant service…")
         tool_registry = build_tool_registry(
             get_motion   = lambda: self.motion,
             get_tts      = lambda: self.tts,
             get_assistant= lambda: self.assistant,
+            get_vision   = lambda: self.vision,
+            get_sensors  = lambda: self.sensors,
         )
         self.assistant = AssistantService(
             llm=self.llm,
@@ -249,6 +297,15 @@ class Fishseus:
                     self.assistant.clear_history()
                     self._last_interaction = 0.0
 
+            # Handle any queued sensor events before listening again.
+            try:
+                event = self._event_queue.get_nowait()
+            except Empty:
+                pass
+            else:
+                self._handle_sensor_event(event)
+                continue
+
             _log("listen", "Waiting for speech…")
             try:
                 wav_path = self.audio.record_until_silence(self._speech_wav)
@@ -277,6 +334,31 @@ class Fishseus:
             command = stt_result.command_text.strip() or "Hello."
             self._last_interaction = time.monotonic()
             self._handle_command(command)
+
+    # -------------------------------------------------------------------
+    # Sensor events
+    # -------------------------------------------------------------------
+
+    def _on_sensor_event(self, event: SensorEvent) -> None:
+        """Called from the sensor watcher thread — just enqueue for the main loop."""
+        self._event_queue.put(event)
+
+    def _handle_sensor_event(self, event: SensorEvent) -> None:
+        assert self.assistant is not None
+        _log("sensor", f"Event: {event.name} ({event.description})")
+
+        try:
+            result = self.assistant.handle_sensor_event(event.description)
+        except Exception as exc:
+            _log("sensor", f"Event handling failed: {exc}")
+            return
+
+        if not result.speak:
+            _log("sensor", "Fish chose not to react")
+            return
+
+        _log("sensor", f"Reaction: '{result.speak}'")
+        self._speak_with_motion(result.speak, result.motion, cooldown=True)
 
     # -------------------------------------------------------------------
     # Command handling
@@ -482,6 +564,18 @@ class Fishseus:
                 self.stt.shutdown()
             except Exception as exc:
                 _log("shutdown", f"STT error: {exc}")
+
+        if self.sensors is not None:
+            try:
+                self.sensors.shutdown()
+            except Exception as exc:
+                _log("shutdown", f"Sensors error: {exc}")
+
+        if self.vision is not None:
+            try:
+                self.vision.close()
+            except Exception as exc:
+                _log("shutdown", f"Vision error: {exc}")
 
         if self.tts is not None:
             try:

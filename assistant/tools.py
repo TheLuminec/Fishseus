@@ -25,13 +25,21 @@ from assistant_service import Tool, ToolRegistry
 if TYPE_CHECKING:
     from assistant_service import AssistantService
     from motion_service import MotionService
+    from sensor_service import SensorService
     from tts_service import TtsService
+    from vision_service import VisionService
+
+
+def _none() -> None:
+    return None
 
 
 def build_tool_registry(
     get_motion: Callable[[], Optional["MotionService"]],
     get_tts: Callable[[], Optional["TtsService"]],
     get_assistant: Callable[[], Optional["AssistantService"]],
+    get_vision: Callable[[], Optional["VisionService"]] = _none,
+    get_sensors: Callable[[], Optional["SensorService"]] = _none,
 ) -> ToolRegistry:
     """
     Instantiate and populate the tool registry.
@@ -160,6 +168,35 @@ def build_tool_registry(
         print(f"[memory] → recall_memory called ({summary.count(chr(10)) + 1} lines)", flush=True)
         return summary
 
+    def look(camera: str = "", question: str = "") -> str:
+        vision = get_vision()
+        if vision is None:
+            return "My eyes are not connected — no camera available"
+        prompt = question.strip() or "Describe what you see in one or two sentences."
+        try:
+            print(f"[vision] Capturing from camera '{camera or 'default'}'…", flush=True)
+            result = vision.look(camera, prompt)
+            print(f"[vision] → {result[:100]}", flush=True)
+            return result
+        except Exception as exc:
+            return f"My vision is clouded: {exc}"
+
+    def check_sensors() -> str:
+        sensors = get_sensors()
+        if sensors is None:
+            return "No sensors are connected"
+        report = sensors.status()
+        if not report:
+            return "No sensors are configured"
+        lines = []
+        for s in report:
+            since = s.get("seconds_since_trigger")
+            if since is None:
+                lines.append(f"{s['name']}: never triggered")
+            else:
+                lines.append(f"{s['name']}: last triggered {int(since)} seconds ago")
+        return "; ".join(lines)
+
     # ------------------------------------------------------------------
     # Tool table
     # ------------------------------------------------------------------
@@ -176,6 +213,8 @@ def build_tool_registry(
         Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe",  True,         False),
         Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe",  True,         True),
         Tool("clear_session",    "Clear conversation history for a completely fresh start. No args.",      clear_session,    "safe",  False,        False),
+        Tool("look",             "Look through the camera and describe what is seen. Args: camera string (optional name), question string (optional, what to look for).", look, "safe", True, True),
+        Tool("check_sensors",    "Check when each sensor (motion detector etc.) last triggered. No args.", check_sensors,    "safe",  True,         False),
         Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe",  True,         False),
         Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe",  False,        False),
     ]

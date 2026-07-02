@@ -390,6 +390,55 @@ class AssistantService:
 
         return result
 
+    def handle_sensor_event(self, event_description: str) -> AssistantResult:
+        """
+        React to a sensor event (motion detected, door opened, ...) rather than
+        a spoken command.  Returns a short in-character reaction.
+
+        Kept separate from handle_user_text so event text never triggers the
+        memory-intent detector and events are clearly framed for the model.
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": "\n\n".join([
+                    self.personality_prompt,
+                    self._memory_prompt(),
+                    "A sensor just triggered — this is NOT a spoken command. React briefly "
+                    "in character (1-2 sentences). You may greet, comment, or stay quiet. "
+                    'Reply as valid JSON with only "speak" and "motion" fields. '
+                    'If no reaction is warranted, set "speak" to an empty string.',
+                ]),
+            },
+            {"role": "user", "content": f"[SENSOR EVENT] {event_description}"},
+        ]
+
+        start = time.monotonic()
+        try:
+            llm_result = self.llm.chat(
+                messages,
+                temperature=self.config.temperature,
+                max_tokens=150,
+                response_format={"type": "json_object"},
+            )
+        except LlmServiceError as exc:
+            print(f"[AssistantService] sensor event LLM call failed: {exc}")
+            return AssistantResult(speak="", motion="idle", elapsed_s=time.monotonic() - start)
+
+        parsed = llm_result.parse_json_content()
+        speak = str((parsed or {}).get("speak") or "").strip()
+        motion = str((parsed or {}).get("motion") or "speaking").strip().lower()
+        if motion not in {"idle", "speaking", "happy", "annoyed", "thinking", "excited"}:
+            motion = "speaking"
+
+        return AssistantResult(
+            speak=speak,
+            motion=motion,
+            raw_model_text=llm_result.content,
+            parsed_json=parsed,
+            elapsed_s=time.monotonic() - start,
+        )
+
     def formulate_tool_response(
         self,
         user_text: str,
