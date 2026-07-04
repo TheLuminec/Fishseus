@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import atexit
 import json
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -159,6 +161,19 @@ DEFAULT_CONFIG: dict[str, object] = {
         "assistant_name": "Fishseus",
         "user_name": "User",
         "personality_path": "../config/personality_prompt.txt",
+    },
+    "vision": {
+        "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
+        "model": "qwen2.5vl:3b",
+        "timeout_s": 60,
+        "max_tokens": 300,
+        "default_camera": "front",
+        "cameras": {},
+    },
+    "sensors": {
+        "enabled": False,
+        "poll_interval_s": 0.05,
+        "sensors": [],
     },
 }
 
@@ -526,6 +541,86 @@ def api_section(section: str):
     config[section] = config_section
     save_config(config)
     return jsonify({"status": "saved"})
+
+# --- Hardware device discovery ---
+
+_ALSA_CARD_RE = re.compile(
+    r"^card (\d+): (\S+) \[(.+?)\], device (\d+): (.+?) \[(.+?)\]", re.MULTILINE
+)
+
+
+def _list_alsa_devices(command: str) -> list[dict]:
+    """Parse `arecord -l` / `aplay -l` output into device entries."""
+    try:
+        proc = subprocess.run([command, "-l"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+
+    devices = []
+    for m in _ALSA_CARD_RE.finditer(proc.stdout):
+        card, card_id, card_name, dev, dev_id, dev_name = m.groups()
+        devices.append({
+            "id": f"plughw:{card},{dev}",
+            "card": int(card),
+            "device": int(dev),
+            "label": f"{card_name} — {dev_name} (plughw:{card},{dev})",
+        })
+    return devices
+
+
+def _list_cameras() -> list[dict]:
+    """Detect cameras: rpicam CSI cameras and /dev/video* V4L2 devices."""
+    cameras = []
+
+    # CSI cameras via rpicam-hello
+    try:
+        proc = subprocess.run(
+            ["rpicam-hello", "--list-cameras"],
+            capture_output=True, text=True, timeout=8,
+        )
+        if proc.returncode == 0:
+            for m in re.finditer(r"^(\d+)\s*:\s*(\S+)\s*\[(.+?)\]", proc.stdout, re.MULTILINE):
+                idx, sensor, modes = m.groups()
+                cameras.append({
+                    "id": f"csi:{idx}",
+                    "label": f"CSI camera {idx}: {sensor} [{modes}]",
+                    "suggested_command": (
+                        f"rpicam-still --camera {idx} -o {{output}} "
+                        "--width 1280 --height 720 --nopreview -t 500"
+                    ),
+                })
+    except Exception:
+        pass
+
+    # USB / V4L2 devices
+    try:
+        for dev in sorted(Path("/dev").glob("video*")):
+            name = ""
+            name_file = Path(f"/sys/class/video4linux/{dev.name}/name")
+            if name_file.exists():
+                name = name_file.read_text().strip()
+            cameras.append({
+                "id": str(dev),
+                "label": f"{dev} — {name}" if name else str(dev),
+                "suggested_command": f"fswebcam -d {dev} -r 1280x720 --no-banner {{output}}",
+            })
+    except Exception:
+        pass
+
+    return cameras
+
+
+@app.route("/api/devices")
+def api_devices():
+    """List available capture, playback, and camera devices on this machine."""
+    return jsonify({
+        "capture": _list_alsa_devices("arecord"),
+        "playback": _list_alsa_devices("aplay"),
+        "cameras": _list_cameras(),
+    })
+
 
 # --- Audio amplitude streaming ---
 

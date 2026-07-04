@@ -49,10 +49,16 @@
             <a class="nav-link" data-section="tts">
                 <span class="nav-icon">🔊</span> Text-to-Speech
             </a>
+            <a class="nav-link" data-section="vision">
+                <span class="nav-icon">👁️</span> Vision
+            </a>
 
             <div class="nav-section-label">Hardware</div>
             <a class="nav-link" data-section="motion">
                 <span class="nav-icon">⚙️</span> Motion Control
+            </a>
+            <a class="nav-link" data-section="sensors">
+                <span class="nav-icon">📡</span> Sensors
             </a>
 
             <div class="nav-section-label">Identity</div>
@@ -228,6 +234,15 @@
             <div class="card">
                 <div class="card-title"><span class="card-icon">🎙️</span> Device Configuration</div>
                 <div class="form-group">
+                    <label for="audio_device_select">Detected Microphones</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="audio_device_select" style="flex:1;">
+                            <option value="">— select a detected device —</option>
+                        </select>
+                        <button class="btn btn-secondary btn-sm" id="btn-refresh-mics" title="Re-scan devices">↻</button>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label for="audio_device">Input Device</label>
                     <input type="text" id="audio_device" placeholder="plughw:3,0">
                 </div>
@@ -329,6 +344,15 @@
                     <label for="tts_default_voice">Default Voice</label>
                     <input type="text" id="tts_default_voice">
                 </div>
+                <div class="form-group">
+                    <label for="tts_device_select">Detected Speakers</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="tts_device_select" style="flex:1;">
+                            <option value="">— select a detected device —</option>
+                        </select>
+                        <button class="btn btn-secondary btn-sm" id="btn-refresh-speakers" title="Re-scan devices">↻</button>
+                    </div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="tts_audio_device">Playback Device</label>
@@ -341,6 +365,63 @@
                 </div>
                 <div class="btn-group">
                     <button class="btn btn-primary" id="save-tts">Save TTS Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vision -->
+        <div class="content-section" id="sec-vision">
+            <div class="section-header">
+                <h2>Vision</h2>
+                <p>Configure the vision model and camera sources the fish can look through.</p>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🧠</span> Vision Model</div>
+                <div class="form-group">
+                    <label for="vision_endpoint_url">Endpoint URL</label>
+                    <input type="url" id="vision_endpoint_url">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="vision_model">Model</label>
+                        <input type="text" id="vision_model" placeholder="qwen2.5vl:3b">
+                    </div>
+                    <div class="form-group">
+                        <label for="vision_timeout_s">Timeout (s)</label>
+                        <input type="number" id="vision_timeout_s" min="5">
+                    </div>
+                    <div class="form-group">
+                        <label for="vision_max_tokens">Max Tokens</label>
+                        <input type="number" id="vision_max_tokens" min="50">
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📷</span> Detected Cameras</div>
+                <div class="btn-group" style="margin-bottom:12px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-cameras">↻ Scan for Cameras</button>
+                </div>
+                <div id="detected-cameras" style="display:flex; flex-direction:column; gap:8px;">
+                    <p style="color:var(--text-secondary); font-size:13px;">Not scanned yet.</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🎛️</span> Camera Sources</div>
+                <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
+                    Named camera sources as JSON. Type "command" runs a local capture binary
+                    ({output} is replaced with the image path); type "url" fetches a JPEG snapshot over HTTP.
+                </p>
+                <div class="form-group">
+                    <label for="vision_default_camera">Default Camera Name</label>
+                    <input type="text" id="vision_default_camera" placeholder="front" style="max-width:240px;">
+                </div>
+                <div class="form-group">
+                    <textarea id="vision_cameras_json" rows="8" spellcheck="false"
+                        style="font-family:monospace; font-size:12px;"
+                        placeholder='{&#10;  "front": {&#10;    "type": "command",&#10;    "command": "rpicam-still -o {output} --width 1280 --height 720 --nopreview -t 500"&#10;  }&#10;}'></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-vision">Save Vision Settings</button>
                 </div>
             </div>
         </div>
@@ -510,6 +591,34 @@
                 </div>
                 <div class="btn-group" style="margin-top: 12px;">
                     <button class="btn btn-danger motor-btn" id="fine-estop">⚡ Emergency Stop All</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sensors -->
+        <div class="content-section" id="sec-sensors">
+            <div class="section-header">
+                <h2>Sensors</h2>
+                <p>GPIO sensors (motion detectors, switches) that can wake the fish and trigger reactions.</p>
+            </div>
+            <div class="card">
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="sensors_enabled">
+                        Enable sensor watching
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="sensors_poll_interval_s">Poll Interval (s)</label>
+                    <input type="number" id="sensors_poll_interval_s" step="0.01" min="0.01" style="max-width:160px;">
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📡</span> Configured Sensors</div>
+                <div id="sensor-rows" style="display:flex; flex-direction:column; gap:10px;"></div>
+                <div class="btn-group" style="margin-top:12px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-add-sensor">+ Add Sensor</button>
+                    <button class="btn btn-primary" id="save-sensors">Save Sensor Settings</button>
                 </div>
             </div>
         </div>
@@ -790,6 +899,21 @@ document.addEventListener('DOMContentLoaded', () => {
             setVal('assistant_name', as.assistant_name || 'Fishseus');
             setVal('user_name', as.user_name || 'User');
 
+            // Vision
+            const v = c.vision || {};
+            setVal('vision_endpoint_url', v.endpoint_url);
+            setVal('vision_model', v.model);
+            setVal('vision_timeout_s', v.timeout_s);
+            setVal('vision_max_tokens', v.max_tokens);
+            setVal('vision_default_camera', v.default_camera);
+            setVal('vision_cameras_json', JSON.stringify(v.cameras || {}, null, 2));
+
+            // Sensors
+            const sn = c.sensors || {};
+            setVal('sensors_enabled', sn.enabled);
+            setVal('sensors_poll_interval_s', sn.poll_interval_s);
+            renderSensorRows(sn.sensors || []);
+
         } catch (e) {
             showToast('Failed to load configuration', 'error');
         }
@@ -862,6 +986,174 @@ document.addEventListener('DOMContentLoaded', () => {
             audio_device: getVal('tts_audio_device'),
             output_dir: getVal('tts_output_dir'),
         });
+    });
+
+    // Vision
+    document.getElementById('save-vision').addEventListener('click', () => {
+        let cameras;
+        try {
+            cameras = JSON.parse(getVal('vision_cameras_json') || '{}');
+        } catch (e) {
+            showToast('Camera Sources is not valid JSON', 'error');
+            return;
+        }
+        saveSection('vision', {
+            endpoint_url: getVal('vision_endpoint_url'),
+            model: getVal('vision_model'),
+            timeout_s: getVal('vision_timeout_s', 'float'),
+            max_tokens: getVal('vision_max_tokens', 'int'),
+            default_camera: getVal('vision_default_camera'),
+            cameras: cameras,
+        });
+    });
+
+    // Sensors
+    function renderSensorRows(sensors) {
+        const container = document.getElementById('sensor-rows');
+        container.innerHTML = '';
+        sensors.forEach(s => addSensorRow(s));
+        if (!sensors.length) {
+            container.innerHTML = '<p class="sensor-empty" style="color:var(--text-secondary);font-size:13px;">No sensors configured. Click "+ Add Sensor".</p>';
+        }
+    }
+
+    function addSensorRow(s = {}) {
+        const container = document.getElementById('sensor-rows');
+        const empty = container.querySelector('.sensor-empty');
+        if (empty) empty.remove();
+
+        const row = document.createElement('div');
+        row.className = 'sensor-row';
+        row.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; padding:10px; border:1px solid var(--border,rgba(255,255,255,.08)); border-radius:8px;';
+        row.innerHTML = `
+            <div class="form-group" style="margin:0; flex:1; min-width:110px;">
+                <label>Name</label>
+                <input type="text" data-sk="name" value="${esc(s.name || '')}" placeholder="motion">
+            </div>
+            <div class="form-group" style="margin:0; width:80px;">
+                <label>Pin (BCM)</label>
+                <input type="number" data-sk="pin" value="${s.pin ?? ''}" min="0">
+            </div>
+            <div class="form-group" style="margin:0; width:100px;">
+                <label>Cooldown (s)</label>
+                <input type="number" data-sk="cooldown_s" value="${s.cooldown_s ?? 60}" min="0">
+            </div>
+            <div class="form-group" style="margin:0; flex:2; min-width:180px;">
+                <label>Description (what the fish is told)</label>
+                <input type="text" data-sk="description" value="${esc(s.description || '')}" placeholder="Motion detected near the fish">
+            </div>
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; padding-bottom:8px; cursor:pointer;">
+                <input type="checkbox" data-sk="active_high" ${s.active_high !== false ? 'checked' : ''}> Active High
+            </label>
+            <button class="btn btn-danger btn-sm sensor-remove" style="margin-bottom:2px;">✕</button>
+        `;
+        row.querySelector('.sensor-remove').addEventListener('click', () => {
+            row.remove();
+            if (!container.querySelector('.sensor-row')) renderSensorRows([]);
+        });
+        container.appendChild(row);
+    }
+
+    document.getElementById('btn-add-sensor').addEventListener('click', () => addSensorRow());
+
+    document.getElementById('save-sensors').addEventListener('click', () => {
+        const sensors = [];
+        document.querySelectorAll('#sensor-rows .sensor-row').forEach(row => {
+            const get = k => row.querySelector(`[data-sk="${k}"]`);
+            const name = get('name').value.trim();
+            const pin = parseInt(get('pin').value, 10);
+            if (!name || isNaN(pin)) return; // skip incomplete rows
+            sensors.push({
+                name: name,
+                pin: pin,
+                active_high: get('active_high').checked,
+                cooldown_s: parseFloat(get('cooldown_s').value) || 60,
+                description: get('description').value.trim() || name,
+            });
+        });
+        saveSection('sensors', {
+            enabled: getVal('sensors_enabled'),
+            poll_interval_s: getVal('sensors_poll_interval_s', 'float'),
+            sensors: sensors,
+        });
+    });
+
+    // =====================================================================
+    // Device discovery (mics / speakers / cameras)
+    // =====================================================================
+    async function loadDevices() {
+        try {
+            const data = await api('GET', '/api/devices');
+            populateDeviceSelect('audio_device_select', data.capture || []);
+            populateDeviceSelect('tts_device_select', data.playback || []);
+            renderDetectedCameras(data.cameras || []);
+            return data;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function populateDeviceSelect(selectId, devices) {
+        const sel = document.getElementById(selectId);
+        if (!sel) return;
+        const current = sel.value;
+        sel.innerHTML = '<option value="">— select a detected device —</option>';
+        devices.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.label;
+            sel.appendChild(opt);
+        });
+        if (current) sel.value = current;
+    }
+
+    function renderDetectedCameras(cameras) {
+        const container = document.getElementById('detected-cameras');
+        if (!container) return;
+        if (!cameras.length) {
+            container.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">No cameras detected on this machine.</p>';
+            return;
+        }
+        container.innerHTML = '';
+        cameras.forEach(cam => {
+            const div = document.createElement('div');
+            div.style.cssText = 'display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 10px; border:1px solid var(--border,rgba(255,255,255,.08)); border-radius:8px; font-size:12px;';
+            div.innerHTML = `
+                <span style="flex:1; min-width:200px;">${esc(cam.label)}</span>
+                <button class="btn btn-secondary btn-sm cam-use-btn">Use as source</button>
+            `;
+            div.querySelector('.cam-use-btn').addEventListener('click', () => {
+                let cameras_cfg = {};
+                try { cameras_cfg = JSON.parse(getVal('vision_cameras_json') || '{}'); } catch (e) {}
+                const name = prompt('Name for this camera source:', 'front');
+                if (!name) return;
+                cameras_cfg[name] = { type: 'command', command: cam.suggested_command };
+                setVal('vision_cameras_json', JSON.stringify(cameras_cfg, null, 2));
+                if (!getVal('vision_default_camera')) setVal('vision_default_camera', name);
+                showToast(`Camera "${name}" added — remember to Save`, 'info');
+            });
+            container.appendChild(div);
+        });
+    }
+
+    // Dropdown selection fills the matching text input
+    document.getElementById('audio_device_select').addEventListener('change', (e) => {
+        if (e.target.value) setVal('audio_device', e.target.value);
+    });
+    document.getElementById('tts_device_select').addEventListener('change', (e) => {
+        if (e.target.value) setVal('tts_audio_device', e.target.value);
+    });
+    document.getElementById('btn-refresh-mics').addEventListener('click', async () => {
+        const d = await loadDevices();
+        showToast(d ? `Found ${(d.capture || []).length} capture device(s)` : 'Device scan failed', d ? 'info' : 'error');
+    });
+    document.getElementById('btn-refresh-speakers').addEventListener('click', async () => {
+        const d = await loadDevices();
+        showToast(d ? `Found ${(d.playback || []).length} playback device(s)` : 'Device scan failed', d ? 'info' : 'error');
+    });
+    document.getElementById('btn-refresh-cameras').addEventListener('click', async () => {
+        const d = await loadDevices();
+        showToast(d ? `Found ${(d.cameras || []).length} camera(s)` : 'Device scan failed', d ? 'info' : 'error');
     });
 
     // Motion
@@ -1559,6 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
     loadPersonality();
     loadStatus();
+    loadDevices();
     switchSection('dashboard');
 });
 </script>
