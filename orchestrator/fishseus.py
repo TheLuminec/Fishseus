@@ -523,6 +523,8 @@ class Fishseus:
                 assistant = self.assistant,
                 motion    = self.motion,
                 tts       = self.tts,
+                vision    = self.vision,
+                sensors   = self.sensors,
             )
             if self.assistant is not None:
                 _web.set_tool_registry(self.assistant.tool_registry)

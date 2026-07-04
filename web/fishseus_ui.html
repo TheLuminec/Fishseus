@@ -86,6 +86,13 @@
                 <p>Overview of your Fishseus system. Service indicators update live on page load.</p>
             </div>
             <div class="status-grid" id="status-grid">
+                <div class="status-card" id="status-audio">
+                    <div class="status-label">Audio Capture</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
                 <div class="status-card" id="status-llm">
                     <div class="status-label">Language Model</div>
                     <div class="status-value">
@@ -109,6 +116,20 @@
                 </div>
                 <div class="status-card" id="status-tts">
                     <div class="status-label">Text-to-Speech</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+                <div class="status-card" id="status-vision">
+                    <div class="status-label">Vision</div>
+                    <div class="status-value">
+                        <span class="status-dot unavailable"></span>
+                        <span class="status-text">Loading…</span>
+                    </div>
+                </div>
+                <div class="status-card" id="status-sensors">
+                    <div class="status-label">Sensors</div>
                     <div class="status-value">
                         <span class="status-dot unavailable"></span>
                         <span class="status-text">Loading…</span>
@@ -374,6 +395,39 @@
             <div class="section-header">
                 <h2>Vision</h2>
                 <p>Configure the vision model and camera sources the fish can look through.</p>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">👁️</span> Live View</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+                    <select id="vision_live_camera" style="min-width:160px;">
+                        <option value="">— default camera —</option>
+                    </select>
+                    <button class="btn btn-primary btn-sm" id="btn-snapshot">📷 Snapshot</button>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                        <input type="checkbox" id="vision_auto_refresh"> Auto-refresh (2s)
+                    </label>
+                </div>
+                <div id="vision-preview-wrap" style="
+                    background: var(--bg-input, #1e1e2e);
+                    border: 1px solid var(--border, rgba(255,255,255,.08));
+                    border-radius: 8px;
+                    min-height: 220px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    overflow: hidden;
+                ">
+                    <span id="vision-preview-placeholder" style="color:var(--text-secondary); font-size:13px;">
+                        No snapshot yet — press Snapshot to see through the fish's eyes.
+                    </span>
+                    <img id="vision-preview" alt="Camera snapshot"
+                         style="display:none; max-width:100%; max-height:480px; border-radius:6px;">
+                </div>
+                <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                    <input type="text" id="vision_describe_question" placeholder="Ask about the view (optional) — e.g. Is anyone there?" style="flex:1; min-width:220px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-describe">🧠 Describe</button>
+                </div>
+                <div id="vision-describe-result" style="display:none; margin-top:10px; font-size:13px; line-height:1.6; color:var(--text-secondary); border-left:3px solid #6c63ff; padding-left:10px;"></div>
             </div>
             <div class="card">
                 <div class="card-title"><span class="card-icon">🧠</span> Vision Model</div>
@@ -908,6 +962,20 @@ document.addEventListener('DOMContentLoaded', () => {
             setVal('vision_default_camera', v.default_camera);
             setVal('vision_cameras_json', JSON.stringify(v.cameras || {}, null, 2));
 
+            // Live-view camera dropdown from configured sources
+            const liveSel = document.getElementById('vision_live_camera');
+            if (liveSel) {
+                const current = liveSel.value;
+                liveSel.innerHTML = '<option value="">— default camera —</option>';
+                Object.keys(v.cameras || {}).forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    liveSel.appendChild(opt);
+                });
+                if (current) liveSel.value = current;
+            }
+
             // Sensors
             const sn = c.sensors || {};
             setVal('sensors_enabled', sn.enabled);
@@ -1154,6 +1222,71 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-refresh-cameras').addEventListener('click', async () => {
         const d = await loadDevices();
         showToast(d ? `Found ${(d.cameras || []).length} camera(s)` : 'Device scan failed', d ? 'info' : 'error');
+    });
+
+    // =====================================================================
+    // Vision Live View
+    // =====================================================================
+    let visionRefreshTimer = null;
+    let snapshotBusy = false;
+
+    function takeSnapshot() {
+        if (snapshotBusy) return;
+        snapshotBusy = true;
+        const camera = getVal('vision_live_camera') || '';
+        const img = document.getElementById('vision-preview');
+        const placeholder = document.getElementById('vision-preview-placeholder');
+        const url = '/api/vision/snapshot?camera=' + encodeURIComponent(camera) + '&t=' + Date.now();
+
+        const probe = new Image();
+        probe.onload = () => {
+            img.src = probe.src;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+            snapshotBusy = false;
+        };
+        probe.onerror = () => {
+            snapshotBusy = false;
+            if (!visionRefreshTimer) showToast('Snapshot failed — is a camera configured and the fish running?', 'error');
+        };
+        probe.src = url;
+    }
+
+    function stopVisionRefresh() {
+        if (visionRefreshTimer) { clearInterval(visionRefreshTimer); visionRefreshTimer = null; }
+        const chk = document.getElementById('vision_auto_refresh');
+        if (chk) chk.checked = false;
+    }
+
+    document.getElementById('btn-snapshot').addEventListener('click', takeSnapshot);
+
+    document.getElementById('vision_auto_refresh').addEventListener('change', (e) => {
+        if (e.target.checked) {
+            takeSnapshot();
+            visionRefreshTimer = setInterval(takeSnapshot, 2000);
+        } else {
+            stopVisionRefresh();
+        }
+    });
+
+    document.getElementById('btn-describe').addEventListener('click', async () => {
+        const btn = document.getElementById('btn-describe');
+        const resultEl = document.getElementById('vision-describe-result');
+        btn.disabled = true;
+        resultEl.style.display = 'block';
+        resultEl.textContent = 'Capturing and thinking…';
+        try {
+            const resp = await api('POST', '/api/vision/describe', {
+                camera: getVal('vision_live_camera') || '',
+                question: getVal('vision_describe_question') || '',
+            });
+            resultEl.textContent = resp.description || resp.error || 'No response';
+            takeSnapshot(); // show the frame that was described
+        } catch (e) {
+            resultEl.textContent = 'Describe failed — vision service unavailable.';
+        } finally {
+            btn.disabled = false;
+        }
     });
 
     // Motion
@@ -1824,6 +1957,7 @@ document.addEventListener('DOMContentLoaded', () => {
         _origSwitch2(name);
         if (name === 'tools') loadTools();
         if (name === 'memory') { loadMemory(); loadHistory(); }
+        if (name !== 'vision') stopVisionRefresh();
     };
 
     // Add inline toggle styles

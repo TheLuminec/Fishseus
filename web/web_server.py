@@ -27,7 +27,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory
 
 # ---------------------------------------------------------------------
 # Path setup
@@ -39,7 +39,7 @@ CONFIG_FILE = PROJECT_ROOT / "config" / "fish_config.json"
 
 # Add each service directory to sys.path so bare module imports work,
 # matching the pattern used by the orchestrator.
-for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts"):
+for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "vision", "sensors"):
     _candidate = PROJECT_ROOT / _subdir
     if _candidate.exists() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
@@ -55,6 +55,8 @@ _available: dict[str, bool] = {
     "assistant": False,
     "motion": False,
     "tts": False,
+    "vision": False,
+    "sensors": False,
 }
 
 # Audio (requires ALSA / arecord — Linux only)
@@ -91,6 +93,13 @@ try:
     _available["tts"] = True
 except Exception:
     TtsConfig = TtsService = None  # type: ignore[assignment, misc]
+
+# Vision (no hardware deps — just needs requests)
+try:
+    from vision_service import VisionConfig, VisionService  # type: ignore[import-untyped]
+    _available["vision"] = True
+except Exception:
+    VisionConfig = VisionService = None  # type: ignore[assignment, misc]
 
 # Assistant requires a working LLM
 if _available["assistant"] and not _available["llm"]:
@@ -214,6 +223,8 @@ _llm: "LlmService | None" = None
 _assistant: "AssistantService | None" = None
 _motion: "MotionService | None" = None
 _tts: "TtsService | None" = None
+_vision: "VisionService | None" = None
+_sensors = None  # SensorService — only ever injected by the orchestrator
 _tool_registry = None  # injected by orchestrator via set_tool_registry()
 
 # Rolling amplitude buffer for the live graph
@@ -240,7 +251,7 @@ def _build_motor_configs(motion_conf: dict) -> "dict[str, MotorConfig]":
 
 def init_services() -> None:
     """Initialise all available services using current config."""
-    global _audio, _llm, _assistant, _motion, _tts
+    global _audio, _llm, _assistant, _motion, _tts, _vision
     config = load_config()
 
     # --- Audio ---
@@ -339,6 +350,30 @@ def init_services() -> None:
             _assistant = None
             _available["assistant"] = False
 
+    # --- Vision ---
+    if _available["vision"] and _vision is None:
+        try:
+            vc = config.get("vision", {})
+            if vc.get("cameras"):
+                _vision = VisionService(
+                    VisionConfig(
+                        endpoint_url=vc.get("endpoint_url", ""),
+                        model=vc.get("model", "qwen2.5vl:3b"),
+                        timeout_s=float(vc.get("timeout_s", 60.0)),
+                        max_tokens=int(vc.get("max_tokens", 300)),
+                        capture_dir=PROJECT_ROOT / "tmp" / "vision",
+                        cameras=vc.get("cameras", {}),
+                        default_camera=vc.get("default_camera", ""),
+                    )
+                )
+                print("[web] Vision service ready")
+            else:
+                _available["vision"] = False
+        except Exception as exc:
+            print(f"[web] Vision service init failed: {exc}")
+            _vision = None
+            _available["vision"] = False
+
     # --- TTS ---
     if _available["tts"] and _tts is None:
         try:
@@ -365,7 +400,7 @@ def init_services() -> None:
 
 def reset_services() -> None:
     """Tear down all service instances so they can be reinitialised."""
-    global _audio, _llm, _assistant, _motion, _tts
+    global _audio, _llm, _assistant, _motion, _tts, _vision
 
     if _audio is not None:
         try:
@@ -386,11 +421,18 @@ def reset_services() -> None:
         except Exception:
             pass
 
+    if _vision is not None:
+        try:
+            _vision.close()
+        except Exception:
+            pass
+
     _audio = None
     _llm = None
     _assistant = None
     _motion = None
     _tts = None
+    _vision = None
 
     with _amp_lock:
         _amp_history.clear()
@@ -405,6 +447,8 @@ def reset_services() -> None:
     _available["assistant"] = AssistantService is not None and LlmService is not None
     _available["motion"] = MotionService is not None
     _available["tts"] = TtsService is not None
+    _available["vision"] = VisionService is not None
+    _available["sensors"] = False  # only ever available via orchestrator injection
 
 
 def set_tool_registry(registry) -> None:
@@ -424,6 +468,8 @@ def set_services(
     assistant=None,
     motion=None,
     tts=None,
+    vision=None,
+    sensors=None,
 ) -> None:
     """
     Inject pre-initialised service instances from an external orchestrator.
@@ -432,7 +478,7 @@ def set_services(
     same service objects the orchestrator is using.  Any argument left as
     None is left unchanged.
     """
-    global _audio, _llm, _assistant, _motion, _tts
+    global _audio, _llm, _assistant, _motion, _tts, _vision, _sensors
 
     if audio is not None:
         _audio = audio
@@ -449,6 +495,12 @@ def set_services(
     if tts is not None:
         _tts = tts
         _available["tts"] = True
+    if vision is not None:
+        _vision = vision
+        _available["vision"] = True
+    if sensors is not None:
+        _sensors = sensors
+        _available["sensors"] = True
 
 
 def shutdown_services() -> None:
@@ -505,6 +557,8 @@ def api_status():
                 "assistant": "ready" if _available["assistant"] and _assistant is not None else "unavailable",
                 "motion": "ready" if _available["motion"] and _motion is not None else "unavailable",
                 "tts": "ready" if _available["tts"] and _tts is not None else "unavailable",
+                "vision": "ready" if _available["vision"] and _vision is not None else "unavailable",
+                "sensors": "ready" if _available["sensors"] and _sensors is not None else "unavailable",
             }
         }
     )
@@ -775,6 +829,48 @@ def api_motor(command: str):
 
         return jsonify({"error": f"Unknown motor command '{command}'"}), 404
 
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# --- Vision (camera view + describe) ---
+
+@app.route("/api/vision/snapshot")
+def api_vision_snapshot():
+    """Capture a frame from the named camera and return the JPEG."""
+    if _vision is None:
+        return jsonify({"error": "Vision service unavailable"}), 503
+    camera = request.args.get("camera", "")
+    try:
+        frame = _vision.capture(camera)
+        return send_file(str(frame), mimetype="image/jpeg", max_age=0)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/vision/describe", methods=["POST"])
+def api_vision_describe():
+    """Capture a frame and ask the vision model about it."""
+    if _vision is None:
+        return jsonify({"error": "Vision service unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    camera = str(data.get("camera", ""))
+    question = str(data.get("question", "")).strip() or "Describe what you see in one or two sentences."
+    try:
+        frame = _vision.capture(camera)
+        description = _vision.describe(frame, question)
+        return jsonify({"description": description, "camera": camera or "default"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/sensors/status")
+def api_sensors_status():
+    """Live state of every configured sensor (orchestrator mode only)."""
+    if _sensors is None:
+        return jsonify({"available": False, "sensors": []})
+    try:
+        return jsonify({"available": True, "sensors": _sensors.status()})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
