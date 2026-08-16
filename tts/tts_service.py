@@ -77,7 +77,7 @@ class TtsConfig(ServiceConfig):
             raise TtsServiceError(f"Piper binary not found: {self.piper_binary}")
         if not self.voices_dir.exists():
             raise TtsServiceError(f"Voices directory not found: {self.voices_dir}")
-        if not self._voice_path(self.default_voice).exists():
+        if not Path(self.config.voices_dir / f"{self.default_voice}.onnx").exists():
             raise TtsServiceError(f"Default voice model not found: {self.default_voice}")
         return True
 
