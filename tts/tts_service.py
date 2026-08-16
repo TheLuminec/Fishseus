@@ -30,7 +30,6 @@ Orchestrator usage:
 
 from __future__ import annotations
 
-import json
 import subprocess
 import threading
 import time
@@ -90,6 +89,11 @@ class TtsService(Service):
         # Persistent piper daemon state
         self._daemon_proc: Optional[subprocess.Popen] = None
         self._daemon_voice: Optional[str] = None
+        # piper (>=1.4) picks its own timestamped filenames in --output-dir
+        # mode, so the daemon writes here and we move each WAV to its final
+        # path.  Kept separate from output_dir to avoid clashing with the
+        # subprocess-mode files.
+        self._daemon_out_dir = self.config.output_dir / "_daemon"
         # Reentrant: public methods take the lock and call into daemon
         # helpers that take it again on the same thread.
         self._daemon_lock = threading.RLock()
@@ -103,6 +107,7 @@ class TtsService(Service):
         self.config.validate()  # raises TtsServiceError on any problem
 
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        self._daemon_out_dir.mkdir(parents=True, exist_ok=True)
         self.current_voice = self.config.default_voice
 
         if self.config.persistent:
@@ -189,21 +194,63 @@ class TtsService(Service):
         return self._synthesize_subprocess(text, output_path, voice_name)
 
     def _synthesize_daemon(self, text: str, output_path: Path) -> Path:
-        """Send one synthesis request to the resident piper process."""
+        """Speak one line to the resident piper process and collect its WAV.
+
+        piper (>=1.4) has no JSON protocol.  In --output-dir mode it stays
+        resident, reading one line of text per synthesis from stdin and
+        writing a timestamped WAV into the daemon output dir.  We clear the
+        dir, send the line, wait for the new file to appear and finish
+        writing, then move it to output_path.
+        """
         proc = self._daemon_proc
 
-        payload = json.dumps({"text": text, "output_file": str(output_path)})
         with self._daemon_lock:
+            # Empty the dir so the only WAV that shows up is this call's.
+            for stale in self._daemon_out_dir.glob("*.wav"):
+                stale.unlink(missing_ok=True)
+
             try:
-                proc.stdin.write(payload + "\n")
+                proc.stdin.write(text + "\n")
                 proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 raise TtsServiceError(
                     f"Write to piper daemon failed: {exc}{self._daemon_exit_info(proc)}"
                 ) from exc
 
+            produced = self._await_daemon_wav(proc)
+            produced.replace(output_path)
+
+        return output_path
+
+    def _await_daemon_wav(self, proc: subprocess.Popen) -> Path:
+        """Wait for piper to write a WAV into the (pre-cleared) output dir and
+        finish flushing it.  Returns the path of that file.
+        """
         deadline = time.monotonic() + self.config.timeout_s
-        while not output_path.exists():
+        candidate: Optional[Path] = None
+        last_size = -1
+        stable = 0
+
+        while True:
+            if candidate is None:
+                found = sorted(self._daemon_out_dir.glob("*.wav"))
+                if found:
+                    candidate = found[0]
+            else:
+                try:
+                    size = candidate.stat().st_size
+                except FileNotFoundError:
+                    candidate, size = None, -1
+                # A WAV header is 44 bytes; wait for the size to settle so we
+                # don't move the file out from under piper mid-write.
+                if candidate is not None and size == last_size and size > 44:
+                    stable += 1
+                    if stable >= 2:
+                        return candidate
+                else:
+                    stable = 0
+                last_size = size
+
             if time.monotonic() > deadline:
                 raise TtsServiceError("Piper daemon synthesis timed out")
             if proc.poll() is not None:
@@ -212,10 +259,6 @@ class TtsService(Service):
                     f"{self._daemon_exit_info(proc)}"
                 )
             time.sleep(0.02)
-
-        # Brief pause to ensure piper has closed/flushed the WAV before we read it.
-        time.sleep(0.05)
-        return output_path
 
     def _synthesize_subprocess(self, text: str, output_path: Path, voice_name: str) -> Path:
         """Fallback: spawn a fresh piper process for one utterance."""
@@ -306,11 +349,19 @@ class TtsService(Service):
             print(f"[TtsService] Cannot start daemon: voice files missing for '{voice_name}'")
             return
 
+        # Fresh output dir so leftover WAVs can't be mistaken for new output.
+        self._daemon_out_dir.mkdir(parents=True, exist_ok=True)
+        for stale in self._daemon_out_dir.glob("*.wav"):
+            stale.unlink(missing_ok=True)
+
+        # piper stays resident in --output-dir mode: one line of text on stdin
+        # per synthesis, one timestamped WAV written to the output dir.
         cmd = [
             str(self.config.piper_binary),
             "--model", str(model_path),
             "--config", str(config_path),
-            "--json-input",  # read {"text":…,"output_file":…} JSON lines from stdin
+            "--output-dir", str(self._daemon_out_dir),
+            "--output-dir-naming", "timestamp",
         ]
         with self._daemon_lock:
             try:
