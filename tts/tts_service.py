@@ -10,18 +10,22 @@ Responsibilities:
 - Play WAV output through aplay / ALSA
 - Keep a simple API for the orchestrator
 
-Non-responsibilities:
-- No fish motion logic
-- No assistant logic
-- No memory
-- No LLM logic
-
 Example:
     tts = TtsService()
     tts.initialize()           # starts the persistent piper daemon
     wav = tts.synthesize("Behold, I awaken.")
     tts.play_wav(wav)
     tts.shutdown()
+
+Orchestrator usage:
+    tts = TtsService(TtsConfig(**config.get("tts", {})))
+    tts.initialize()
+    tts.speak("Hello, world!") # Uses default voice and plays the WAV
+    tts.speak("Hello, world!", voice="some_other_voice") # Switches voice for this speach
+    tts.set_voice("some_other_voice") # Switches voice for all future speech
+    tts.speak("Hello, world!") # Uses the new default voice
+    tts.reset()                # Restarts the daemon with the current voice (use if broken)
+    tts.shutdown()  # Cleans up daemon
 """
 
 from __future__ import annotations
@@ -34,18 +38,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from services import Service, ServiceConfig, ServiceError
 
-class TtsServiceError(RuntimeError):
+ROOT_DIR = Path(__file__).parent.parent.resolve()
+
+class TtsServiceError(ServiceError):
     pass
 
 
 @dataclass(frozen=True)
-class TtsConfig:
-    # Piper executable in PATH
-    piper_binary: str = "piper"
+class TtsConfig(ServiceConfig):
+    module_name: str = "tts"
+
+    # Piper executable (absolute path into the tts venv)
+    piper_binary: Path = Path(ROOT_DIR / "tts" / ".venv" / "bin" / "piper")
 
     # Folder containing *.onnx voices
-    voices_dir: Path = Path("../tts/voices")
+    voices_dir: Path = Path(ROOT_DIR / "tts" / "voices")
 
     # Default voice filename stem (without .onnx)
     default_voice: str = "en_US-arctic-medium"
@@ -54,7 +63,7 @@ class TtsConfig:
     audio_device: str = "plughw:0,0"
 
     # Temporary output directory
-    output_dir: Path = Path("../tmp/tts")
+    output_dir: Path = Path(ROOT_DIR / "tmp" / "tts")
 
     # Piper synthesis timeout (applies to both daemon and subprocess modes)
     timeout_s: float = 30.0
@@ -63,30 +72,66 @@ class TtsConfig:
     # Set to False to fall back to one-subprocess-per-call behaviour.
     persistent: bool = True
 
+    def validate(self) -> bool:
+        if not self.piper_binary.exists():
+            raise TtsServiceError(f"Piper binary not found: {self.piper_binary}")
+        if not self.voices_dir.exists():
+            raise TtsServiceError(f"Voices directory not found: {self.voices_dir}")
+        if not self._voice_path(self.default_voice).exists():
+            raise TtsServiceError(f"Default voice model not found: {self.default_voice}")
+        return True
 
-class TtsService:
+
+class TtsService(Service):
     def __init__(self, config: TtsConfig = TtsConfig()) -> None:
         self.config = config
-        self.config.output_dir.mkdir(parents=True, exist_ok=True)
-        self.current_voice = self.config.default_voice
+        self.current_voice = config.default_voice
 
         # Persistent piper daemon state
         self._daemon_proc: Optional[subprocess.Popen] = None
         self._daemon_voice: Optional[str] = None
-        self._daemon_lock = threading.Lock()
+        # Reentrant: public methods take the lock and call into daemon
+        # helpers that take it again on the same thread.
+        self._daemon_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def initialize(self) -> None:
+    def initialize(self) -> bool:
         """Start the persistent Piper daemon (if persistent=True)."""
-        if self.config.persistent:
-            self._start_daemon(self.current_voice)
+        self.config.validate()  # raises TtsServiceError on any problem
 
-    def shutdown(self) -> None:
+        self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        self.current_voice = self.config.default_voice
+
+        if self.config.persistent:
+            with self._daemon_lock:
+                self._start_daemon(self.current_voice)
+        return True
+
+    def shutdown(self) -> bool:
         """Terminate the daemon process cleanly."""
         self._stop_daemon()
+        return True
+
+    def status(self) -> dict:
+        """Return a dict of status information."""
+        status = {
+            "enabled": self.enabled,
+            "service": "ok",
+            "daemon_alive": self._daemon_alive(),
+            "current_voice": self.current_voice,
+        }
+        return status
+
+    def reset(self) -> bool:
+        """Reset the service.  Return True if successful, False otherwise."""
+        self._stop_daemon()
+        if self.config.persistent:
+            with self._daemon_lock:
+                self._start_daemon(self.current_voice)
+        return True
 
     # ------------------------------------------------------------------
     # Voice management
@@ -102,9 +147,7 @@ class TtsService:
             raise TtsServiceError(f"Voice not found: {voice_name}")
         self.current_voice = voice_name
         # Restart daemon so the new model is pre-loaded.
-        if self.config.persistent:
-            with self._daemon_lock:
-                self._start_daemon(voice_name)
+        self.reset()
 
     # ------------------------------------------------------------------
     # Synthesis
@@ -127,32 +170,34 @@ class TtsService:
             output_path = self.config.output_dir / f"tts_{timestamp}.wav"
         output_path = Path(output_path)
 
+        if output_path.exists():
+            output_path.unlink()
+
         # Use the resident daemon when possible — avoids reloading the ONNX model.
         if self.config.persistent and voice_name == self._daemon_voice:
-            with self._daemon_lock:
-                if self._daemon_alive():
-                    try:
+            if self._daemon_alive():
+                try:
+                    return self._synthesize_daemon(text, output_path)
+                except TtsServiceError as exc:
+                    print(f"[TtsService] Daemon synthesis failed ({exc}), restarting daemon…")
+                    self.reset()
+                    # One retry after daemon restart; fall through to the
+                    # subprocess path if the daemon did not come back up.
+                    if self._daemon_alive():
                         return self._synthesize_daemon(text, output_path)
-                    except TtsServiceError as exc:
-                        print(f"[TtsService] Daemon synthesis failed ({exc}), restarting daemon…")
-                        self._start_daemon(voice_name)
-                        # One retry after daemon restart
-                        if self._daemon_alive():
-                            return self._synthesize_daemon(text, output_path)
 
         return self._synthesize_subprocess(text, output_path, voice_name)
 
     def _synthesize_daemon(self, text: str, output_path: Path) -> Path:
         """Send one synthesis request to the resident piper process."""
-        if output_path.exists():
-            output_path.unlink()
 
         payload = json.dumps({"text": text, "output_file": str(output_path)})
-        try:
-            self._daemon_proc.stdin.write(payload + "\n")
-            self._daemon_proc.stdin.flush()
-        except (BrokenPipeError, OSError) as exc:
-            raise TtsServiceError(f"Write to piper daemon failed: {exc}") from exc
+        with self._daemon_lock:
+            try:
+                self._daemon_proc.stdin.write(payload + "\n")
+                self._daemon_proc.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                raise TtsServiceError(f"Write to piper daemon failed: {exc}") from exc
 
         deadline = time.monotonic() + self.config.timeout_s
         while not output_path.exists():
@@ -235,6 +280,7 @@ class TtsService:
         voice: Optional[str] = None,
         blocking: bool = True,
     ) -> Path:
+        """Synthesize and play the given text.  Return the WAV path."""
         wav = self.synthesize(text, voice=voice)
         self.play_wav(wav, blocking=blocking)
         return wav
@@ -260,24 +306,24 @@ class TtsService:
             "--config", str(config_path),
             "--json-input",  # read {"text":…,"output_file":…} JSON lines from stdin
         ]
-
-        try:
-            self._daemon_proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,  # line-buffered
-            )
-            self._daemon_voice = voice_name
-            print(f"[TtsService] Piper daemon started (voice={voice_name}, pid={self._daemon_proc.pid})")
-        except FileNotFoundError:
-            print(f"[TtsService] Piper binary not found: {self.config.piper_binary}")
-            self._daemon_proc = None
-        except Exception as exc:
-            print(f"[TtsService] Daemon start failed: {exc}")
-            self._daemon_proc = None
+        with self._daemon_lock:
+            try:
+                self._daemon_proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,  # line-buffered
+                )
+                self._daemon_voice = voice_name
+                print(f"[TtsService] Piper daemon started (voice={voice_name}, pid={self._daemon_proc.pid})")
+            except FileNotFoundError:
+                print(f"[TtsService] Piper binary not found: {self.config.piper_binary}")
+                self._daemon_proc = None
+            except Exception as exc:
+                print(f"[TtsService] Daemon start failed: {exc}")
+                self._daemon_proc = None
 
     def _stop_daemon(self) -> None:
         proc = self._daemon_proc
@@ -312,35 +358,3 @@ class TtsService:
     def _voice_config_path(self, voice_name: str) -> Path:
         return Path(self.config.voices_dir) / f"{voice_name}.onnx.json"
 
-
-# ----------------------------------------------------------------------
-# Manual test runner
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    tts = TtsService(
-        TtsConfig(
-            piper_binary="piper",
-            voices_dir=Path("./voices"),
-            default_voice="en_US-arctic-medium",
-            audio_device="plughw:0,0",
-            persistent=True,
-        )
-    )
-
-    print("Available voices:")
-    for voice in tts.available_voices():
-        print(f"  - {voice}")
-
-    tts.initialize()
-    try:
-        print("\nTesting speech (daemon mode)…")
-        wav = tts.synthesize("Behold. Fishseus has found its voice.")
-        print(f"Generated: {wav}")
-        tts.play_wav(wav)
-
-        print("\nSecond utterance (model already in memory)…")
-        wav2 = tts.synthesize("The deep sea calls. I answer.")
-        print(f"Generated: {wav2}")
-        tts.play_wav(wav2)
-    finally:
-        tts.shutdown()

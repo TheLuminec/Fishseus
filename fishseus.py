@@ -28,7 +28,7 @@ Configuration is read from config/fish_config.json.  No code changes needed
 for tuning hardware or model settings.
 
 Usage:
-    python orchestrator/fishseus.py [--port 8000] [--no-web]
+    python fishseus.py [--port 8000] [--no-web]
 """
 
 from __future__ import annotations
@@ -36,34 +36,23 @@ from __future__ import annotations
 import argparse
 import json
 import signal
-import sys
 import threading
 import time
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Optional
 
-# -----------------------------------------------------------------------
-# Path setup — mirrors the pattern used by the demo orchestrators
-# -----------------------------------------------------------------------
+from audio.audio_service import AudioConfig, AudioService
+from stt.stt_service import SttConfig, SttService
+from llm.llm_service import LlmConfig, LlmService
+from assistant.assistant_service import AssistantConfig, AssistantService
+from motion.motion_service import MotionService, MotorConfig
+from tts.tts_service import TtsConfig, TtsService
+from vision.vision_service import VisionConfig, VisionService
+from sensors.sensor_service import SensorConfig, SensorService, SensorEvent
+from assistant.tools import build_tool_registry
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "web", "vision", "sensors"):
-    _candidate = PROJECT_ROOT / _subdir
-    if _candidate.exists() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
-
-from audio_service import AudioConfig, AudioService
-from stt_service import SttConfig, SttService
-from llm_service import LlmConfig, LlmService
-from assistant_service import AssistantConfig, AssistantService
-from motion_service import MotionService, MotorConfig
-from tts_service import TtsConfig, TtsService
-from vision_service import VisionConfig, VisionService
-from sensor_service import SensorConfig, SensorService, SensorEvent
-from tools import build_tool_registry
-
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # -----------------------------------------------------------------------
 # Helpers
@@ -471,7 +460,7 @@ class Fishseus:
     def _on_amplitude(self, amp: float) -> None:
         # Forward to web server's rolling buffer so the UI graph stays live.
         try:
-            import web_server as _web
+            import web.web_server as _web
             _web._amplitude_callback(amp)
         except Exception:
             pass
@@ -516,7 +505,7 @@ class Fishseus:
 
     def _start_web_server(self) -> None:
         try:
-            import web_server as _web
+            import web.web_server as _web
             _web.set_services(
                 audio     = self.audio,
                 llm       = self.llm,
