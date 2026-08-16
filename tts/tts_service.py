@@ -190,21 +190,27 @@ class TtsService(Service):
 
     def _synthesize_daemon(self, text: str, output_path: Path) -> Path:
         """Send one synthesis request to the resident piper process."""
+        proc = self._daemon_proc
 
         payload = json.dumps({"text": text, "output_file": str(output_path)})
         with self._daemon_lock:
             try:
-                self._daemon_proc.stdin.write(payload + "\n")
-                self._daemon_proc.stdin.flush()
+                proc.stdin.write(payload + "\n")
+                proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
-                raise TtsServiceError(f"Write to piper daemon failed: {exc}") from exc
+                raise TtsServiceError(
+                    f"Write to piper daemon failed: {exc}{self._daemon_exit_info(proc)}"
+                ) from exc
 
         deadline = time.monotonic() + self.config.timeout_s
         while not output_path.exists():
             if time.monotonic() > deadline:
                 raise TtsServiceError("Piper daemon synthesis timed out")
-            if not self._daemon_alive():
-                raise TtsServiceError("Piper daemon exited unexpectedly during synthesis")
+            if proc.poll() is not None:
+                raise TtsServiceError(
+                    f"Piper daemon exited unexpectedly during synthesis"
+                    f"{self._daemon_exit_info(proc)}"
+                )
             time.sleep(0.02)
 
         # Brief pause to ensure piper has closed/flushed the WAV before we read it.
@@ -347,6 +353,26 @@ class TtsService(Service):
 
     def _daemon_alive(self) -> bool:
         return self._daemon_proc is not None and self._daemon_proc.poll() is None
+
+    def _daemon_exit_info(self, proc: Optional[subprocess.Popen]) -> str:
+        """Best-effort exit code + stderr from a daemon that has already died.
+
+        Only reads stderr once the process has actually exited, otherwise the
+        read would block on the still-open pipe.
+        """
+        if proc is None:
+            return ""
+        rc = proc.poll()
+        if rc is None:
+            return ""
+        try:
+            err = proc.stderr.read() if proc.stderr else ""
+        except Exception:
+            err = ""
+        detail = f" (exit code {rc})"
+        if err and err.strip():
+            detail += f"\n[piper stderr]\n{err.strip()}"
+        return detail
 
     # ------------------------------------------------------------------
     # Helpers
