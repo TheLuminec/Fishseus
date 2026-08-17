@@ -1,37 +1,46 @@
 """
 stt_service.py
 
-Speech-to-text service for the Fishseus/Billy Bass assistant project.
+Thin local speech-to-text service for Fishseus using whisper.cpp.
 
-This service wraps a local whisper.cpp executable and exposes a clean Python API
-for the orchestrator. It intentionally does not capture audio itself; audio
-capture remains the responsibility of audio_service.py.
+Responsibilities:
+- Transcribe a WAV file to text with the whisper.cpp CLI
+- Run transcription synchronously, or on a background worker thread
+- Detect (and optionally strip) configured wake words
+- Keep a simple API for the orchestrator
 
-Initial integration mode:
-- audio_service records a WAV file when speech is detected
-- stt_service transcribes that WAV with whisper.cpp
-- orchestrator checks for wake words and routes text to the assistant/LLM layer
+Non-responsibilities:
+- No audio capture (that is audio_service.py)
+- No assistant logic
+- No memory
+- No LLM logic
 
-Why file-based first?
-- Easier to debug
-- Works well with whisper.cpp CLI
-- Avoids fighting live-streaming edge cases early
-- Keeps STT isolated and replaceable later
+Pipeline: audio_service records a WAV on speech -> stt_service transcribes it ->
+the orchestrator checks wake words and routes command text to the assistant/LLM.
 
-Later upgrades:
-- streaming whisper.cpp mode
-- faster wake-word prefilter
-- remote STT backend
-- multiple STT model profiles
+Example (blocking):
+    stt = SttService()
+    stt.initialize()                       # validates config, starts the worker
+    result = stt.transcribe_file("tmp/latest_speech.wav")
+    if result.wake_detected:
+        print(result.command_text)
+    stt.shutdown()
+
+Orchestrator usage (async):
+    stt = SttService(SttConfig(**config.get("stt", {})))
+    stt.initialize()
+    stt.transcribe_file_async(wav_path)             # queue, returns immediately
+    stt.transcribe_file_async(wav_path, on_result)  # or deliver via callback
+    result = stt.get_result(timeout=5.0)            # poll for the next result
+    if result and result.wake_detected:
+        handle(result.command_text)
+    stt.shutdown()                                  # stops the worker
 """
 
 from __future__ import annotations
 
-import sys
-import json
 import re
 import subprocess
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -39,9 +48,13 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Callable, Optional
 
+from services import Service, ServiceConfig, ServiceError, ROOT_DIR
+
+class SttServiceError(ServiceError):
+    pass
 
 @dataclass(frozen=True)
-class SttConfig:
+class SttConfig(ServiceConfig):
     """
     Configuration for whisper.cpp CLI transcription.
 
@@ -50,9 +63,10 @@ class SttConfig:
         models/ggml-base.en.bin
         models/ggml-small.en.bin
     """
+    module_name: str = "stt"
 
-    whisper_binary: str = "./whisper.cpp/build/bin/whisper-cli"
-    model_path: str = "./whisper.cpp/models/ggml-base.en.bin"
+    whisper_binary: Path = ROOT_DIR / "stt" / "whisper.cpp" / "build" / "bin" / "whisper-cli"
+    model_path: Path = ROOT_DIR / "stt" / "whisper.cpp" / "models" / "ggml-base.en.bin"
 
     language: str = "en"
     threads: int = 2
@@ -70,10 +84,19 @@ class SttConfig:
     wake_words: tuple[str, ...] = ("fish",)
 
     # If true, remove common wake words from the returned command text.
-    strip_wake_word: bool = True
+    strip_wake_word: bool = False
 
     # Optional extra whisper.cpp args for experimentation.
     extra_args: tuple[str, ...] = field(default_factory=tuple)
+
+    def validate(self) -> bool:
+        if not self.whisper_binary.exists():
+            raise SttServiceError(f"whisper.cpp binary not found: {self.whisper_binary}")
+
+        if not self.model_path.exists():
+            raise SttServiceError(f"whisper.cpp model not found: {self.model_path}")
+
+        return True
 
 
 @dataclass(frozen=True)
@@ -88,7 +111,7 @@ class TranscriptionResult:
     raw_stderr: str = ""
 
 
-class SttService:
+class SttService(Service):
     """
     Thin, replaceable STT layer around whisper.cpp.
 
@@ -117,18 +140,11 @@ class SttService:
     # Lifecycle
     # ------------------------------------------------------------------
     def initialize(self) -> None:
+        self.config.validate()
+
         with self._lock:
             if self._initialized:
                 return
-
-            binary = Path(self.config.whisper_binary)
-            model = Path(self.config.model_path)
-
-            if not binary.exists():
-                raise FileNotFoundError(f"whisper.cpp binary not found: {binary}")
-
-            if not model.exists():
-                raise FileNotFoundError(f"whisper.cpp model not found: {model}")
 
             self._stop_event.clear()
             self._worker_thread = threading.Thread(
@@ -141,17 +157,33 @@ class SttService:
 
     def shutdown(self) -> None:
         with self._lock:
-            if not self._initialized:
-                return
-
             self._stop_event.set()
-            self._job_queue.put((Path("__shutdown__"), None))
 
             if self._worker_thread is not None:
+                # The worker only checks _stop_event between jobs; if it's mid
+                # transcription (whisper.cpp can run up to timeout_s) the join
+                # may time out.  Keep the reference until it actually exits so
+                # status() doesn't falsely report the worker as gone.
                 self._worker_thread.join(timeout=2.0)
-                self._worker_thread = None
+                if not self._worker_thread.is_alive():
+                    self._worker_thread = None
 
             self._initialized = False
+
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "worker_thread_alive": self._worker_thread.is_alive() if self._worker_thread else False,
+            "job_queue_size": self._job_queue.qsize(),
+            "result_queue_size": self._result_queue.qsize()
+        }
 
     # ------------------------------------------------------------------
     # Public synchronous API
@@ -165,11 +197,11 @@ class SttService:
             result = stt.transcribe_file(wav)
         """
         if not self._initialized:
-            raise RuntimeError("SttService.initialize() must be called first")
+            raise SttServiceError("SttService.initialize() must be called first")
 
         source_path = Path(wav_path)
         if not source_path.exists():
-            raise FileNotFoundError(f"WAV file not found: {source_path}")
+            raise SttServiceError(f"WAV file not found: {source_path}")
 
         start = time.monotonic()
         stdout, stderr = self._run_whisper_cli(source_path)
@@ -204,7 +236,7 @@ class SttService:
         Results can be received either through callback or get_result().
         """
         if not self._initialized:
-            raise RuntimeError("SttService.initialize() must be called first")
+            raise SttServiceError("SttService.initialize() must be called first")
 
         self._job_queue.put((Path(wav_path), callback))
 
@@ -253,18 +285,21 @@ class SttService:
             except Empty:
                 continue
 
-            if str(wav_path) == "__shutdown__":
-                break
-
             try:
                 result = self.transcribe_file(wav_path)
-                self._result_queue.put(result)
-                if callback is not None:
-                    callback(result)
             except Exception as exc:
                 print(f"[SttService] transcription failed for {wav_path}: {exc}")
+                continue                        # keep the worker alive
             finally:
                 self._job_queue.task_done()
+            
+            if callback is None:
+                self._result_queue.put(result)
+            else:
+                try:
+                    callback(result)
+                except Exception as exc:
+                    print(f"[SttService] result callback failed: {exc}")
 
     # ------------------------------------------------------------------
     # whisper.cpp integration
@@ -280,7 +315,7 @@ class SttService:
         )
 
         if completed.returncode != 0:
-            raise RuntimeError(
+            raise SttServiceError(
                 "whisper.cpp failed with code "
                 f"{completed.returncode}\nSTDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
             )
@@ -291,8 +326,8 @@ class SttService:
         cfg = self.config
 
         cmd = [
-            cfg.whisper_binary,
-            "-m", cfg.model_path,
+            str(cfg.whisper_binary),
+            "-m", str(cfg.model_path),
             "-f", str(wav_path),
             "-l", cfg.language,
             "-t", str(cfg.threads),
@@ -351,33 +386,3 @@ class SttService:
         text = re.sub(r"\s+", " ", text)
         return text
 
-
-# ----------------------------------------------------------------------
-# Manual test runner
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    # Edit these paths to match your whisper.cpp install.
-    config = SttConfig(
-        whisper_binary="./whisper.cpp/build/bin/whisper-cli",
-        model_path="./whisper.cpp/models/ggml-base.en.bin",
-        threads=4,
-        wake_words=("fish", "hey fish"),
-    )
-
-    if len(sys.argv) < 2:
-        print("Usage: python3 stt_service.py path/to/audio.wav")
-        raise SystemExit(1)
-
-    stt = SttService(config)
-    stt.initialize()
-
-    try:
-        result = stt.transcribe_file(sys.argv[1])
-        print("--- Transcription Result ---")
-        print(f"Text:          {result.text}")
-        print(f"Wake detected: {result.wake_detected}")
-        print(f"Wake word:     {result.wake_word}")
-        print(f"Command text:  {result.command_text}")
-        print(f"Elapsed:       {result.elapsed_s:.2f}s")
-    finally:
-        stt.shutdown()

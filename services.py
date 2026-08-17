@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).parent.resolve()
 
 class ServiceError(RuntimeError):
     """Base class for service-related errors."""
@@ -29,13 +32,13 @@ class Service(ABC):
     enabled: bool = True
 
     @abstractmethod
-    def initialize(self) -> bool:
-        """Initialize the service.  Return True if successful, False otherwise."""
+    def initialize(self) -> None:
+        """Initialize the service."""
         pass
 
     @abstractmethod
-    def shutdown(self) -> bool:
-        """Shutdown the service.  Return True if successful, False otherwise."""
+    def shutdown(self) -> None:
+        """Shutdown the service."""
         pass
 
     @abstractmethod

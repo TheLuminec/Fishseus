@@ -1,9 +1,10 @@
 # TTS Module
 
-Thin local text-to-speech service for Fishseus using [Piper](https://github.com/rhasspy/piper).
-Generates WAV speech locally and plays it through ALSA (`aplay`), keeping Piper
-resident as a persistent daemon so the ONNX voice model stays warm in memory
-between utterances.
+Thin local text-to-speech service for Fishseus using
+[Piper](https://github.com/OHF-Voice/piper1-gpl) (≥ 1.4). Generates WAV speech
+locally and plays it through ALSA (`aplay`), keeping Piper resident as a
+persistent daemon so the ONNX voice model stays warm in memory between
+utterances.
 
 **Responsibilities:** local WAV synthesis, persistent daemon management, voice
 switching, and ALSA playback — exposed as a small `Service` API for the
@@ -53,14 +54,21 @@ default voice model is missing. It runs automatically inside `initialize()`.
 
 ## How it works
 
-- On `initialize()`, Piper is launched once in `--json-input` mode with the
-  default voice loaded, and kept alive as a daemon.
-- Each `synthesize()` call sends a `{"text", "output_file"}` JSON line on the
-  daemon's stdin; completion is detected by polling for the output WAV.
+Targets **Piper ≥ 1.4** (the OHF-Voice / `piper1-gpl` rewrite), which has no
+JSON daemon protocol. The resident daemon uses Piper's `--output-dir` mode:
+
+- On `initialize()`, Piper is launched once with the default voice loaded and
+  `--output-dir <output_dir>/_daemon --output-dir-naming timestamp`, staying
+  resident with the ONNX model warm in memory.
+- Each `synthesize()` call clears the daemon dir, writes one line of text to
+  Piper's stdin, waits for the resulting WAV to appear and finish flushing
+  (its size settles), then moves it to the requested `output_path`.
 - If the daemon isn't running (or `persistent=False`, or a different voice is
-  requested), synthesis falls back to spawning a fresh Piper subprocess.
+  requested), synthesis falls back to a fresh one-shot Piper subprocess using
+  `--output_file`.
 - Daemon start/stop is guarded by a reentrant lock so lifecycle transitions and
-  in-flight synthesis don't collide.
+  in-flight synthesis don't collide. If the daemon dies mid-synthesis, the
+  raised `TtsServiceError` includes Piper's exit code and captured stderr.
 
 ## Usage
 
@@ -111,7 +119,9 @@ tts.shutdown()
 
 ## Requirements
 
-- Piper installed at `piper_binary` (default: the `tts/.venv`).
+- Piper ≥ 1.4 (`piper-tts`) installed at `piper_binary` (default: the
+  `tts/.venv`). Older rhasspy Piper builds are **not** supported — the daemon
+  relies on `--output-dir` mode, which only exists in the newer build.
 - Voice models in `voices_dir` — each voice needs both `<name>.onnx` and
   `<name>.onnx.json`.
 - `aplay` (from `alsa-utils`) for playback.

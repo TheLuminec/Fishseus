@@ -21,7 +21,7 @@ Orchestrator usage:
     tts = TtsService(TtsConfig(**config.get("tts", {})))
     tts.initialize()
     tts.speak("Hello, world!") # Uses default voice and plays the WAV
-    tts.speak("Hello, world!", voice="some_other_voice") # Switches voice for this speach
+    tts.speak("Hello, world!", voice="some_other_voice") # Switches voice for this line only
     tts.set_voice("some_other_voice") # Switches voice for all future speech
     tts.speak("Hello, world!") # Uses the new default voice
     tts.reset()                # Restarts the daemon with the current voice (use if broken)
@@ -37,9 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from services import Service, ServiceConfig, ServiceError
-
-ROOT_DIR = Path(__file__).parent.parent.resolve()
+from services import Service, ServiceConfig, ServiceError, ROOT_DIR
 
 class TtsServiceError(ServiceError):
     pass
@@ -50,10 +48,10 @@ class TtsConfig(ServiceConfig):
     module_name: str = "tts"
 
     # Piper executable (absolute path into the tts venv)
-    piper_binary: Path = Path(ROOT_DIR / "tts" / ".venv" / "bin" / "piper")
+    piper_binary: Path = ROOT_DIR / "tts" / ".venv" / "bin" / "piper"
 
     # Folder containing *.onnx voices
-    voices_dir: Path = Path(ROOT_DIR / "tts" / "voices")
+    voices_dir: Path = ROOT_DIR / "tts" / "voices"
 
     # Default voice filename stem (without .onnx)
     default_voice: str = "en_US-arctic-medium"
@@ -62,7 +60,7 @@ class TtsConfig(ServiceConfig):
     audio_device: str = "plughw:0,0"
 
     # Temporary output directory
-    output_dir: Path = Path(ROOT_DIR / "tmp" / "tts")
+    output_dir: Path = ROOT_DIR / "tmp" / "tts"
 
     # Piper synthesis timeout (applies to both daemon and subprocess modes)
     timeout_s: float = 30.0
@@ -76,7 +74,7 @@ class TtsConfig(ServiceConfig):
             raise TtsServiceError(f"Piper binary not found: {self.piper_binary}")
         if not self.voices_dir.exists():
             raise TtsServiceError(f"Voices directory not found: {self.voices_dir}")
-        if not Path(self.voices_dir / f"{self.default_voice}.onnx").exists():
+        if not (self.voices_dir / f"{self.default_voice}.onnx").exists():
             raise TtsServiceError(f"Default voice model not found: {self.default_voice}")
         return True
 
@@ -102,7 +100,7 @@ class TtsService(Service):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def initialize(self) -> bool:
+    def initialize(self) -> None:
         """Start the persistent Piper daemon (if persistent=True)."""
         self.config.validate()  # raises TtsServiceError on any problem
 
@@ -113,22 +111,19 @@ class TtsService(Service):
         if self.config.persistent:
             with self._daemon_lock:
                 self._start_daemon(self.current_voice)
-        return True
 
-    def shutdown(self) -> bool:
+    def shutdown(self) -> None:
         """Terminate the daemon process cleanly."""
         self._stop_daemon()
-        return True
 
     def status(self) -> dict:
         """Return a dict of status information."""
-        status = {
+        return {
             "enabled": self.enabled,
             "service": "ok",
             "daemon_alive": self._daemon_alive(),
             "current_voice": self.current_voice,
         }
-        return status
 
     def reset(self) -> bool:
         """Reset the service.  Return True if successful, False otherwise."""
@@ -136,8 +131,11 @@ class TtsService(Service):
         if self.config.persistent:
             with self._daemon_lock:
                 self._start_daemon(self.current_voice)
-        return True
 
+            return self._daemon_alive()
+
+        return True
+        
     # ------------------------------------------------------------------
     # Voice management
     # ------------------------------------------------------------------
@@ -346,7 +344,7 @@ class TtsService(Service):
         config_path = self._voice_config_path(voice_name)
 
         if not model_path.exists() or not config_path.exists():
-            print(f"[TtsService] Cannot start daemon: voice files missing for '{voice_name}'")
+            raise TtsServiceError(f"[TtsService] Cannot start daemon: voice files missing for '{voice_name}'")
             return
 
         # Fresh output dir so leftover WAVs can't be mistaken for new output.
@@ -430,8 +428,8 @@ class TtsService(Service):
     # ------------------------------------------------------------------
 
     def _voice_path(self, voice_name: str) -> Path:
-        return Path(self.config.voices_dir) / f"{voice_name}.onnx"
+        return self.config.voices_dir / f"{voice_name}.onnx"
 
     def _voice_config_path(self, voice_name: str) -> Path:
-        return Path(self.config.voices_dir) / f"{voice_name}.onnx.json"
+        return self.config.voices_dir / f"{voice_name}.onnx.json"
 
