@@ -152,12 +152,12 @@ class Fishseus:
         # STT
         _log("init", "Starting STT service…")
         self.stt = SttService(SttConfig(
-            whisper_binary = str((config_dir / stt_cfg.get(
+            whisper_binary = Path(str((config_dir / stt_cfg.get(
                 "whisper_binary", "../stt/whisper.cpp/build/bin/whisper-cli"
-            )).resolve()),
-            model_path = str((config_dir / stt_cfg.get(
+            )).resolve())),
+            model_path = Path(str((config_dir / stt_cfg.get(
                 "model_path", "../stt/whisper.cpp/models/ggml-base.en.bin"
-            )).resolve()),
+            )).resolve())),
             threads         = int(stt_cfg.get("threads", 4)),
             wake_words      = stt_cfg.get("wake_words", ["fish", "fishseus", "hey fish"]),
             strip_wake_word = bool(stt_cfg.get("strip_wake_word", True)),
