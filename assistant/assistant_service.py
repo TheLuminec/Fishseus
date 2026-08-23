@@ -40,21 +40,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from llm_service import LlmService, LlmServiceError
+from llm.llm_service import LlmService, LlmServiceError
+from services import Service, ServiceConfig, ServiceError, ROOT_DIR
+
+
+class AssistantServiceError(ServiceError):
+    pass
 
 
 # ----------------------------------------------------------------------
 # Data models
 # ----------------------------------------------------------------------
 
-@dataclass
-class AssistantConfig:
+@dataclass(frozen=True)
+class AssistantConfig(ServiceConfig):
+    module_name: str = "assistant"
+
     assistant_name: str = "Fishseus"
     user_name: str = "Caleb"
 
-    personality_path: Path = Path("../config/personality_prompt.txt")
-    memory_path: Path = Path("../data/assistant_memory.json")
-    history_path: Path = Path("../data/conversation_log.jsonl")
+    personality_path: Path = ROOT_DIR / "config" / "personality_prompt.txt"
+    memory_path: Path = ROOT_DIR / "data" / "assistant_memory.json"
+    history_path: Path = ROOT_DIR / "data" / "conversation_log.jsonl"
 
     max_history_turns: int = 8
     max_tool_calls: int = 3
@@ -65,6 +72,17 @@ class AssistantConfig:
     # If true, memory is only saved when the user's command explicitly asks
     # the assistant to remember something.
     require_explicit_memory_intent: bool = True
+
+    def validate(self) -> bool:
+        if self.max_history_turns < 0:
+            raise AssistantServiceError(
+                f"max_history_turns must be >= 0: {self.max_history_turns}"
+            )
+        if self.max_tool_calls < 0:
+            raise AssistantServiceError(
+                f"max_tool_calls must be >= 0: {self.max_tool_calls}"
+            )
+        return True
 
 
 @dataclass
@@ -311,7 +329,7 @@ class ToolRegistry:
 # Assistant service
 # ----------------------------------------------------------------------
 
-class AssistantService:
+class AssistantService(Service):
     def __init__(
         self,
         llm: LlmService,
@@ -327,6 +345,35 @@ class AssistantService:
 
         self.tool_registry = tool_registry or ToolRegistry()
         self.history: list[dict[str, str]] = []
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    def initialize(self) -> None:
+        # __init__ already loads memory/personality; re-run here (idempotent)
+        # so the orchestrator can drive every service the same way.
+        self.config.validate()
+        self.memory.load()
+        self.personality_prompt = self._load_personality_prompt(self.config.personality_path)
+
+    def shutdown(self) -> None:
+        try:
+            self.memory.save()
+        except Exception as exc:
+            print(f"[AssistantService] memory save failed: {exc}")
+
+    def reset(self) -> bool:
+        self.clear_history()
+        self.memory.load()
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok",
+            "history_turns": len(self.history),
+            "tools": len(self.tool_registry.list_all()),
+        }
 
     def handle_user_text(self, user_text: str) -> AssistantResult:
         """
@@ -780,107 +827,3 @@ Rules:
         text = re.sub(r"<\|[^|]*\|>", "", user_text)
         text = re.sub(r"\s+", " ", text).strip()
         return text or "Hello."
-
-
-# ----------------------------------------------------------------------
-# Demo tools and manual test
-# ----------------------------------------------------------------------
-
-def build_demo_tool_registry() -> ToolRegistry:
-    registry = ToolRegistry()
-
-    def wiggle(cycles: int = 1) -> str:
-        cycles = max(1, min(int(cycles), 5))
-        print(f"[DEMO TOOL] Would wiggle {cycles} cycle(s)")
-        return f"wiggled {cycles} cycle(s)"
-
-    def open_mouth() -> str:
-        print("[DEMO TOOL] Would open mouth")
-        return "opened mouth"
-
-    def set_mode(mode: str) -> str:
-        allowed = {"assistant", "bluetooth"}
-        if mode not in allowed:
-            raise ValueError(f"mode must be one of {sorted(allowed)}")
-        print(f"[DEMO TOOL] Would set mode to {mode}")
-        return f"mode set to {mode}"
-
-    def get_current_time() -> str:
-        return time.strftime("%Y-%m-%d %H:%M:%S")
-
-    registry.register(
-        Tool(
-            name="wiggle",
-            description="Make the fish wiggle. Args: cycles integer from 1 to 5.",
-            function=wiggle,
-            risk="safe",
-        )
-    )
-    registry.register(
-        Tool(
-            name="open_mouth",
-            description="Open the fish mouth once. Args: none.",
-            function=open_mouth,
-            risk="safe",
-        )
-    )
-    registry.register(
-        Tool(
-            name="set_mode",
-            description="Switch mode. Args: mode is 'assistant' or 'bluetooth'.",
-            function=set_mode,
-            risk="safe",
-        )
-    )
-    registry.register(
-        Tool(
-            name="get_current_time",
-            description="Get the current system time. Args: none.",
-            function=get_current_time,
-            risk="safe",
-        )
-    )
-
-    return registry
-
-
-if __name__ == "__main__":
-    from llm_service import LlmConfig
-
-    llm = LlmService(
-        LlmConfig(
-            endpoint_url="http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
-            model="gemma4:e2b",
-            temperature=0.7,
-            max_tokens=350,
-            disable_reasoning=True,
-        )
-    )
-
-    assistant = AssistantService(
-        llm=llm,
-        config=AssistantConfig(
-            memory_path=Path("../data/assistant_memory.json"),
-            history_path=Path("../data/conversation_log.jsonl"),
-        ),
-        tool_registry=build_demo_tool_registry(),
-    )
-
-    try:
-        print("Fishseus assistant demo. Type 'exit' to quit.")
-        while True:
-            user_text = input("You: ").strip()
-            if user_text.lower() in {"exit", "quit"}:
-                break
-
-            result = assistant.handle_user_text(user_text)
-            print("\n--- AssistantResult ---")
-            print(f"Speak:       {result.speak}")
-            print(f"Motion:      {result.motion}")
-            print(f"Tool calls:  {[call.__dict__ for call in result.tool_calls]}")
-            print(f"Tool results:{result.tool_results}")
-            print(f"Memory:      {result.memory_updates}")
-            print(f"Elapsed:     {result.elapsed_s:.2f}s")
-            print()
-    finally:
-        llm.close()

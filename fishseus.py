@@ -46,13 +46,13 @@ from audio.audio_service import AudioConfig, AudioService
 from stt.stt_service import SttConfig, SttService
 from llm.llm_service import LlmConfig, LlmService
 from assistant.assistant_service import AssistantConfig, AssistantService
-from motion.motion_service import MotionService, MotorConfig
+from motion.motion_service import MotionConfig, MotionService, MotorConfig
 from tts.tts_service import TtsConfig, TtsService
 from vision.vision_service import VisionConfig, VisionService
 from sensors.sensor_service import SensorConfig, SensorService, SensorEvent
 from assistant.tools import build_tool_registry
 
-PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+PROJECT_ROOT = Path(__file__).parent.resolve()
 
 # -----------------------------------------------------------------------
 # Helpers
@@ -175,6 +175,7 @@ class Fishseus:
             max_tokens        = int(llm_cfg.get("max_tokens", 512)),
             disable_reasoning = bool(llm_cfg.get("disable_reasoning", True)),
         ))
+        self.llm.initialize()
 
         # TTS  — persistent=True keeps piper loaded in memory
         _log("init", "Starting TTS service (persistent piper daemon)…")
@@ -207,6 +208,7 @@ class Fishseus:
                     cameras        = vision_cfg.get("cameras", {}),
                     default_camera = vision_cfg.get("default_camera", ""),
                 ))
+                self.vision.initialize()
                 _log("init", f"Vision cameras: {self.vision.available_cameras()}")
             except Exception as exc:
                 _log("init", f"Vision service failed to start: {exc}")
@@ -250,6 +252,7 @@ class Fishseus:
             ),
             tool_registry=tool_registry,
         )
+        self.assistant.initialize()
 
         # Web UI
         if self.enable_web:
@@ -489,7 +492,7 @@ class Fishseus:
                 "body":  MotorConfig(5,  6,  12, 68, 45, 0.03),
             }
 
-        return MotionService(
+        return MotionService(MotionConfig(
             motors           = motors,
             pwm_frequency    = int(motion_cfg.get("pwm_frequency", 1000)),
             body_wiggle_time = float(motion_cfg.get("body_wiggle_time", 0.18)),
@@ -497,7 +500,7 @@ class Fishseus:
             mouth_open_time  = float(motion_cfg.get("mouth_open_time", 0.09)),
             mouth_close_time = float(motion_cfg.get("mouth_close_time", 0.04)),
             envelope_window_s= float(motion_cfg.get("envelope_window_s", 0.18)),
-        )
+        ))
 
     # -------------------------------------------------------------------
     # Web server
@@ -564,7 +567,7 @@ class Fishseus:
 
         if self.vision is not None:
             try:
-                self.vision.close()
+                self.vision.shutdown()
             except Exception as exc:
                 _log("shutdown", f"Vision error: {exc}")
 
@@ -581,9 +584,15 @@ class Fishseus:
             except Exception as exc:
                 _log("shutdown", f"Motion error: {exc}")
 
+        if self.assistant is not None:
+            try:
+                self.assistant.shutdown()
+            except Exception as exc:
+                _log("shutdown", f"Assistant error: {exc}")
+
         if self.llm is not None:
             try:
-                self.llm.close()
+                self.llm.shutdown()
             except Exception as exc:
                 _log("shutdown", f"LLM error: {exc}")
 

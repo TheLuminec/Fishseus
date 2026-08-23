@@ -37,12 +37,10 @@ ROOT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT_DIR.parent
 CONFIG_FILE = PROJECT_ROOT / "config" / "fish_config.json"
 
-# Add each service directory to sys.path so bare module imports work,
-# matching the pattern used by the orchestrator.
-for _subdir in ("audio", "stt", "llm", "assistant", "motion", "tts", "vision", "sensors"):
-    _candidate = PROJECT_ROOT / _subdir
-    if _candidate.exists() and str(_candidate) not in sys.path:
-        sys.path.insert(0, str(_candidate))
+# Ensure the repo root is importable so package-style imports resolve when this
+# module runs standalone (python web/web_server.py) as well as via fishseus.py.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 # ---------------------------------------------------------------------
@@ -61,42 +59,42 @@ _available: dict[str, bool] = {
 
 # Audio (requires ALSA / arecord — Linux only)
 try:
-    from audio_service import AudioConfig, AudioService  # type: ignore[import-untyped]
+    from audio.audio_service import AudioConfig, AudioService  # type: ignore[import-untyped]
     _available["audio"] = True
 except Exception:
     AudioConfig = AudioService = None  # type: ignore[assignment, misc]
 
 # LLM
 try:
-    from llm_service import LlmConfig, LlmService  # type: ignore[import-untyped]
+    from llm.llm_service import LlmConfig, LlmService  # type: ignore[import-untyped]
     _available["llm"] = True
 except Exception:
     LlmConfig = LlmService = None  # type: ignore[assignment, misc]
 
 # Assistant (also needs llm to function)
 try:
-    from assistant_service import AssistantConfig, AssistantService, ToolCall  # type: ignore[import-untyped]
+    from assistant.assistant_service import AssistantConfig, AssistantService, ToolCall  # type: ignore[import-untyped]
     _available["assistant"] = True
 except Exception:
     AssistantConfig = AssistantService = ToolCall = None  # type: ignore[assignment, misc]
 
 # Motion (requires RPi.GPIO — will fail on non-Pi machines)
 try:
-    from motion_service import MotionService, MotorConfig  # type: ignore[import-untyped]
+    from motion.motion_service import MotionConfig, MotionService, MotorConfig  # type: ignore[import-untyped]
     _available["motion"] = True
 except Exception:
     MotionService = MotorConfig = None  # type: ignore[assignment, misc]
 
 # TTS
 try:
-    from tts_service import TtsConfig, TtsService  # type: ignore[import-untyped]
+    from tts.tts_service import TtsConfig, TtsService  # type: ignore[import-untyped]
     _available["tts"] = True
 except Exception:
     TtsConfig = TtsService = None  # type: ignore[assignment, misc]
 
 # Vision (no hardware deps — just needs requests)
 try:
-    from vision_service import VisionConfig, VisionService  # type: ignore[import-untyped]
+    from vision.vision_service import VisionConfig, VisionService  # type: ignore[import-untyped]
     _available["vision"] = True
 except Exception:
     VisionConfig = VisionService = None  # type: ignore[assignment, misc]
@@ -281,8 +279,8 @@ def init_services() -> None:
     if _available["motion"] and _motion is None:
         try:
             mc = config.get("motion", {})
-            _motion = MotionService(
-                motors=_build_motor_configs(mc),
+            motors = _build_motor_configs(mc)
+            cfg_kwargs = dict(
                 pwm_frequency=int(mc.get("pwm_frequency", 1000)),
                 body_wiggle_time=float(mc.get("body_wiggle_time", 0.18)),
                 tail_wiggle_time=float(mc.get("tail_wiggle_time", 0.14)),
@@ -290,6 +288,9 @@ def init_services() -> None:
                 mouth_close_time=float(mc.get("mouth_close_time", 0.04)),
                 envelope_window_s=float(mc.get("envelope_window_s", 0.18)),
             )
+            if motors:
+                cfg_kwargs["motors"] = motors  # else MotionConfig's default pinout
+            _motion = MotionService(MotionConfig(**cfg_kwargs))
             _motion.initialize()
             print("[web] Motion service ready")
         except Exception as exc:
@@ -417,13 +418,13 @@ def reset_services() -> None:
 
     if _llm is not None:
         try:
-            _llm.close()
+            _llm.shutdown()
         except Exception:
             pass
 
     if _vision is not None:
         try:
-            _vision.close()
+            _vision.shutdown()
         except Exception:
             pass
 
@@ -518,7 +519,7 @@ def shutdown_services() -> None:
             pass
     if _llm is not None:
         try:
-            _llm.close()
+            _llm.shutdown()
         except Exception:
             pass
 
@@ -870,7 +871,7 @@ def api_sensors_status():
     if _sensors is None:
         return jsonify({"available": False, "sensors": []})
     try:
-        return jsonify({"available": True, "sensors": _sensors.status()})
+        return jsonify({"available": True, "sensors": _sensors.sensor_report()})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

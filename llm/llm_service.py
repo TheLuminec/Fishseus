@@ -1,39 +1,36 @@
 """
 llm_service.py
 
-Thin LLM client for the Fishseus/Billy Bass assistant project.
+Thin OpenAI-compatible LLM client service for Fishseus.
 
-This service is intentionally dumb:
-- It sends OpenAI-compatible chat/completions requests.
-- It supports plug-and-play model/server configuration.
-- It handles timeouts, retries, and basic response parsing.
-- It does NOT own memory, personality, tool policy, or orchestration.
+Responsibilities:
+- Send chat/completions requests to an OpenAI-compatible endpoint (Ollama, etc.)
+- Handle timeouts, retries, and basic response parsing
+- Support plug-and-play model/server configuration
 
-Those higher-level responsibilities belong in assistant_service.py.
-
-Current target endpoint:
-    http://ollama.angelfish-gamma.ts.net/v1/chat/completions
+Non-responsibilities:
+- No memory, personality, tool policy, or orchestration — those belong to
+  assistant_service.py
 
 Expected API shape:
     POST /v1/chat/completions
-    {
-      "model": "model-name",
-      "messages": [{"role": "user", "content": "hello"}],
-      "temperature": 0.7,
-      "max_tokens": 250
-    }
+    {"model": "...", "messages": [{"role": "user", "content": "hello"}],
+     "temperature": 0.7, "max_tokens": 250}
+    -> {"choices": [{"message": {"role": "assistant", "content": "..."}}]}
 
-Response shape:
-    {
-      "choices": [
-        {
-          "message": {
-            "role": "assistant",
-            "content": "..."
-          }
-        }
-      ]
-    }
+Example:
+    llm = LlmService()
+    llm.initialize()
+    result = llm.chat([{"role": "user", "content": "Introduce yourself briefly."}])
+    print(result.content)
+    llm.shutdown()
+
+Orchestrator usage:
+    llm = LlmService(LlmConfig(**config.get("llm", {})))
+    llm.initialize()                 # validates config (no network call)
+    assistant = AssistantService(llm=llm, ...)
+    ...
+    llm.shutdown()
 """
 
 from __future__ import annotations
@@ -45,8 +42,10 @@ from typing import Any, Optional
 
 import requests
 
+from services import Service, ServiceConfig, ServiceError
 
-class LlmServiceError(RuntimeError):
+
+class LlmServiceError(ServiceError):
     """Base error for LLM service failures."""
 
 
@@ -59,12 +58,14 @@ class LlmResponseError(LlmServiceError):
 
 
 @dataclass(frozen=True)
-class LlmConfig:
+class LlmConfig(ServiceConfig):
     """
     Configuration for an OpenAI-compatible chat completion endpoint.
 
     endpoint_url should point directly to /v1/chat/completions.
     """
+
+    module_name: str = "llm"
 
     endpoint_url: str = "http://ollama.angelfish-gamma.ts.net/v1/chat/completions"
 
@@ -93,6 +94,13 @@ class LlmConfig:
 
     # Some local servers accept extra fields; keep them configurable.
     extra_payload: dict[str, Any] = field(default_factory=dict)
+
+    def validate(self) -> bool:
+        if not self.endpoint_url:
+            raise LlmServiceError("endpoint_url must be set")
+        if self.timeout_s <= 0:
+            raise LlmServiceError(f"timeout_s must be positive: {self.timeout_s}")
+        return True
 
 
 @dataclass(frozen=True)
@@ -156,7 +164,7 @@ class LlmResult:
         return None
 
 
-class LlmService:
+class LlmService(Service):
     """
     Thin OpenAI-compatible chat client.
 
@@ -166,7 +174,38 @@ class LlmService:
 
     def __init__(self, config: LlmConfig = LlmConfig()) -> None:
         self.config = config
-        self._session = requests.Session()
+        self._session: Optional[requests.Session] = requests.Session()
+        self._initialized = False
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    def initialize(self) -> None:
+        # Validation only — no network call, so a down server doesn't block
+        # start-up.  Use health_check() explicitly to probe the endpoint.
+        self.config.validate()
+        if self._session is None:
+            self._session = requests.Session()
+        self._initialized = True
+
+    def shutdown(self) -> None:
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._initialized = False
+
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "model": self.config.model,
+            "endpoint": self.config.endpoint_url,
+        }
 
     def chat(
         self,
@@ -207,10 +246,11 @@ class LlmService:
         attempts = max(1, self.config.retries + 1)
         last_error: Optional[BaseException] = None
         start = time.monotonic()
+        session = self._session or requests
 
         for attempt in range(attempts):
             try:
-                response = self._session.post(
+                response = session.post(
                     self.config.endpoint_url,
                     headers=headers,
                     json=payload,
@@ -274,9 +314,6 @@ class LlmService:
             return bool(result.content.strip())
         except Exception:
             return False
-
-    def close(self) -> None:
-        self._session.close()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -415,40 +452,3 @@ def _extract_first_json_object(text: str) -> Optional[str]:
                 return text[start : i + 1]
 
     return None
-
-
-if __name__ == "__main__":
-    config = LlmConfig(
-        endpoint_url="http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
-        # Change this to your actual Ollama model name.
-        model="gemma4:e2b",
-        timeout_s=45.0,
-        retries=1,
-        temperature=0.7,
-        max_tokens=300,
-        disable_reasoning=True,
-    )
-
-    llm = LlmService(config)
-
-    try:
-        result = llm.chat(
-            [
-                {
-                    "role": "system",
-                    "content": "You are Fishseus, a dramatic but helpful talking fish. Reply briefly.",
-                },
-                {
-                    "role": "user",
-                    "content": "Introduce yourself in one sentence.",
-                },
-            ]
-        )
-
-        print("--- LLM Result ---")
-        print(f"Model:   {result.model}")
-        print(f"Elapsed: {result.elapsed_s:.2f}s")
-        print(f"Content: {result.content}")
-
-    finally:
-        llm.close()

@@ -1,21 +1,33 @@
 """
 audio_service.py
 
-Lightweight audio service for the Fishseus/Billy Bass assistant project.
+Thin local audio-capture service for Fishseus using ALSA/arecord.
 
-Design goals:
-- Use a working USB microphone through ALSA/arecord.
-- Keep capture low-overhead so whisper.cpp/STT can run in parallel.
-- Avoid loading large Python audio frameworks.
-- Provide bounded queues so audio cannot endlessly consume RAM.
-- Provide simple APIs for:
-    - live amplitude monitoring
-    - recording a fixed-duration WAV
-    - recording speech after a threshold trigger
-    - streaming PCM chunks to an STT worker
+Responsibilities:
+- Capture PCM from a USB microphone through arecord (low overhead)
+- Expose live amplitude for the web UI graph
+- Record a fixed-duration WAV, or record speech until silence
+- Stream bounded PCM chunks to an STT worker without unbounded RAM growth
 
-This module intentionally does not run Whisper, TTS, or the LLM.
-Those should remain separate services coordinated by the orchestrator.
+Non-responsibilities:
+- No Whisper/STT, no TTS, no LLM, no motion logic — those are separate services
+  coordinated by the orchestrator
+
+Example:
+    audio = AudioService(AudioConfig(device="plughw:1,0"))
+    audio.initialize()
+    audio.start_capture(amplitude_callback=print)
+    wav = audio.record_until_silence("tmp/latest_speech.wav")
+    audio.shutdown()
+
+Orchestrator usage:
+    audio = AudioService(AudioConfig(**config.get("audio", {})))
+    audio.initialize()
+    audio.start_capture(amplitude_callback=on_amplitude)
+    ...
+    audio.stop_capture()   # while the fish is speaking
+    audio.start_capture(amplitude_callback=on_amplitude)
+    audio.shutdown()
 """
 
 from __future__ import annotations
@@ -31,9 +43,17 @@ from pathlib import Path
 from queue import Empty, Full, Queue
 from typing import Callable, Optional
 
+from services import Service, ServiceConfig, ServiceError
+
+
+class AudioServiceError(ServiceError):
+    pass
+
 
 @dataclass(frozen=True)
-class AudioConfig:
+class AudioConfig(ServiceConfig):
+    module_name: str = "audio"
+
     # Use `arecord -L` to find a better device string if needed.
     # For a simple USB mic, "default" or "plughw:<card>,<device>" often works.
     device: str = "default"
@@ -58,6 +78,17 @@ class AudioConfig:
     max_record_seconds: float = 12.0
     pre_roll_seconds: float = 0.4
 
+    def validate(self) -> bool:
+        if self.sample_rate <= 0:
+            raise AudioServiceError(f"sample_rate must be positive: {self.sample_rate}")
+        if self.channels < 1:
+            raise AudioServiceError(f"channels must be >= 1: {self.channels}")
+        if self.sample_width_bytes not in (1, 2):
+            raise AudioServiceError(
+                f"sample_width_bytes must be 1 or 2: {self.sample_width_bytes}"
+            )
+        return True
+
 
 @dataclass(frozen=True)
 class PcmChunk:
@@ -66,22 +97,11 @@ class PcmChunk:
     amplitude: float
 
 
-class AudioService:
+class AudioService(Service):
     """
     Non-blocking audio capture service.
 
-    Typical use:
-
-        audio = AudioService(AudioConfig(device="plughw:1,0"))
-        audio.initialize()
-        audio.start_capture()
-
-        chunk = audio.get_chunk(timeout=0.1)
-        # Send chunk.data to STT worker, or collect chunks into a WAV.
-
-        audio.shutdown()
-
-    The capture thread only reads PCM and computes amplitude. It should stay cheap.
+    The capture thread only reads PCM and computes amplitude — it stays cheap.
     Heavy work like whisper.cpp must run in a different process/thread.
     """
 
@@ -101,14 +121,34 @@ class AudioService:
     # Lifecycle
     # ------------------------------------------------------------------
     def initialize(self) -> None:
+        self.config.validate()
         with self._lock:
             if self._initialized:
                 return
             self._initialized = True
 
+    def shutdown(self) -> None:
+        self.stop_capture()
+        self._initialized = False
+
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+        return True
+
+    def status(self) -> dict:
+        capturing = self._capture_thread is not None and self._capture_thread.is_alive()
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "capturing": capturing,
+            "queue_size": self._chunk_queue.qsize(),
+            "latest_amplitude": round(self._latest_amplitude, 4),
+        }
+
     def start_capture(self, amplitude_callback: Optional[Callable[[float], None]] = None) -> None:
         if not self._initialized:
-            raise RuntimeError("AudioService.initialize() must be called first")
+            raise AudioServiceError("AudioService.initialize() must be called first")
 
         with self._lock:
             if self._capture_thread and self._capture_thread.is_alive():
@@ -141,10 +181,6 @@ class AudioService:
             self._capture_thread = None
 
         self._terminate_arecord()
-
-    def shutdown(self) -> None:
-        self.stop_capture()
-        self._initialized = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -188,7 +224,6 @@ class AudioService:
         Blocking helper that waits for speech, records it, then stops after silence.
 
         Returns the written WAV path, or None if no speech was detected before max time.
-        This is useful before integrating a real VAD/wake-word system.
         """
         output_path = Path(output_path)
         cfg = self.config
@@ -366,39 +401,3 @@ class AudioService:
             wav_file.setsampwidth(self.config.sample_width_bytes)
             wav_file.setframerate(self.config.sample_rate)
             wav_file.writeframes(b"".join(chunks))
-
-
-# ----------------------------------------------------------------------
-# Manual test runner
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    # For USB mics, run `arecord -L` and set this to the stable device name.
-    # Examples:
-    #   device="default"
-    #   device="plughw:1,0"
-    #   device="plughw:CARD=Device,DEV=0"
-    config = AudioConfig(device="default")
-    audio = AudioService(config)
-
-    def print_amp(amp: float) -> None:
-        print(f"Average amplitude: {amp:.4f}")
-
-    audio.initialize()
-    audio.start_capture(amplitude_callback=print_amp)
-
-    try:
-        print("Recording 5 seconds to test_recording.wav...")
-        path = audio.record_fixed_wav("test_recording.wav", duration_s=5.0)
-        print(f"Saved {path}")
-
-        print("Now waiting for speech and recording until silence...")
-        path = audio.record_until_silence("speech_test.wav")
-        if path:
-            print(f"Saved {path}")
-        else:
-            print("No speech detected.")
-
-    except KeyboardInterrupt:
-        print("\nStopping...")
-    finally:
-        audio.shutdown()

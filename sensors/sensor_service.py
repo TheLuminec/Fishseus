@@ -1,14 +1,20 @@
 """
 sensor_service.py
 
-GPIO sensor watcher for the Fishseus assistant.
+Thin GPIO sensor-watcher service for Fishseus.
 
-Watches digital sensors (PIR motion detectors, door switches, buttons, ...)
-on a background thread and fires a callback when one triggers.  Each sensor
-has its own cooldown so a busy hallway doesn't spam the fish.
+Responsibilities:
+- Watch digital sensors (PIR motion detectors, door switches, buttons) on a
+  background thread
+- Debounce triggers with a per-sensor cooldown so a busy hallway doesn't spam
+  the fish
+- Fire a callback with a SensorEvent on each inactive->active edge
 
-The orchestrator decides what to DO with events — this service only detects
-and reports them.
+Non-responsibilities:
+- No decision-making about events (the orchestrator/assistant decides what to do)
+- No motion, audio, assistant, or LLM logic
+- Does not own GPIO cleanup — motion_service/orchestrator owns teardown, so we
+  never call GPIO.cleanup() here (it would tear down the motor pins too)
 
 Config shape (config/fish_config.json "sensors" section):
     {
@@ -30,8 +36,15 @@ Example:
         print(f"{event.name} triggered!")
 
     sensors = SensorService(SensorConfig(sensors=[...]))
-    sensors.initialize()
     sensors.set_callback(on_event)
+    sensors.initialize()
+    ...
+    sensors.shutdown()
+
+Orchestrator usage:
+    sensors = SensorService(SensorConfig(**config.get("sensors", {})))
+    sensors.set_callback(handle_event)
+    sensors.initialize()
 """
 
 from __future__ import annotations
@@ -41,12 +54,18 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from services import Service, ServiceConfig, ServiceError
+
 try:
     import RPi.GPIO as GPIO
     _GPIO_AVAILABLE = True
 except Exception:
     GPIO = None  # type: ignore[assignment]
     _GPIO_AVAILABLE = False
+
+
+class SensorServiceError(ServiceError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -57,13 +76,23 @@ class SensorEvent:
 
 
 @dataclass(frozen=True)
-class SensorConfig:
+class SensorConfig(ServiceConfig):
+    module_name: str = "sensors"
+
     poll_interval_s: float = 0.05
     # Each entry: name, pin (BCM), active_high, cooldown_s, description
     sensors: list[dict[str, Any]] = field(default_factory=list)
 
+    def validate(self) -> bool:
+        if self.poll_interval_s <= 0:
+            raise SensorServiceError(f"poll_interval_s must be positive: {self.poll_interval_s}")
+        for sensor in self.sensors:
+            if "pin" not in sensor:
+                raise SensorServiceError(f"Sensor entry missing 'pin': {sensor}")
+        return True
 
-class SensorService:
+
+class SensorService(Service):
     def __init__(self, config: SensorConfig = SensorConfig()) -> None:
         self.config = config
         self._callback: Optional[Callable[[SensorEvent], None]] = None
@@ -80,6 +109,8 @@ class SensorService:
     # ------------------------------------------------------------------
 
     def initialize(self) -> None:
+        self.config.validate()
+
         if self._initialized:
             return
         if not _GPIO_AVAILABLE:
@@ -117,16 +148,30 @@ class SensorService:
         # GPIO.cleanup() is owned by motion_service / orchestrator shutdown —
         # do not call it here or we'd tear down the motor pins too.
 
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "watcher_alive": self._thread.is_alive() if self._thread else False,
+            "gpio_available": _GPIO_AVAILABLE,
+            "sensor_count": len(self.config.sensors),
+        }
+
     def set_callback(self, callback: Callable[[SensorEvent], None]) -> None:
         """Register the function fired (from the watcher thread) on each trigger."""
         self._callback = callback
 
     # ------------------------------------------------------------------
-    # Status
+    # Per-sensor report (for tools and the web UI)
     # ------------------------------------------------------------------
 
-    def status(self) -> list[dict[str, Any]]:
-        """Current state of every sensor — for tools and the web UI."""
+    def sensor_report(self) -> list[dict[str, Any]]:
+        """Current state of every sensor — richer than status()'s summary dict."""
         now = time.monotonic()
         report = []
         for sensor in self.config.sensors:
@@ -189,24 +234,3 @@ class SensorService:
                 self._callback(event)
             except Exception as exc:
                 print(f"[SensorService] callback failed: {exc}")
-
-
-# ----------------------------------------------------------------------
-# Manual test runner
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    service = SensorService(
-        SensorConfig(
-            sensors=[
-                {"name": "motion", "pin": 16, "active_high": True,
-                 "cooldown_s": 5, "description": "PIR motion detector"},
-            ],
-        )
-    )
-    service.set_callback(lambda e: print(f"EVENT: {e}"))
-    service.initialize()
-    try:
-        print("Watching for 60s… wave at the sensor.")
-        time.sleep(60)
-    finally:
-        service.shutdown()

@@ -20,14 +20,14 @@ import urllib.parse
 import urllib.request
 from typing import TYPE_CHECKING, Callable, Optional
 
-from assistant_service import Tool, ToolRegistry
+from assistant.assistant_service import Tool, ToolRegistry
 
 if TYPE_CHECKING:
-    from assistant_service import AssistantService
-    from motion_service import MotionService
-    from sensor_service import SensorService
-    from tts_service import TtsService
-    from vision_service import VisionService
+    from assistant.assistant_service import AssistantService
+    from motion.motion_service import MotionService
+    from sensors.sensor_service import SensorService
+    from tts.tts_service import TtsService
+    from vision.vision_service import VisionService
 
 
 def _none() -> None:
@@ -185,7 +185,7 @@ def build_tool_registry(
         sensors = get_sensors()
         if sensors is None:
             return "No sensors are connected"
-        report = sensors.status()
+        report = sensors.sensor_report()
         if not report:
             return "No sensors are configured"
         lines = []

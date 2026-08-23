@@ -1,12 +1,52 @@
+"""
+motion_service.py
+
+Thin motion-control service for a Billy Bass style fish (Pi-only — drives GPIO).
+
+Responsibilities:
+- Drive the mouth/tail/body H-bridge motors via PWM on a background worker
+- Offer high-level motion helpers (open_mouth, wiggle, speak_audio, stop_all)
+- Animate the mouth from a WAV's amplitude envelope while TTS plays
+- Support safe shutdown and emergency stop
+
+Non-responsibilities:
+- No audio capture, STT, TTS, assistant, or LLM logic
+
+Notes:
+- Each motor is an H-bridge with IN1/IN2 + EN PWM, BCM GPIO numbering.
+- Reverse pulses can be shorter because the mechanism springs back to neutral.
+- Imports RPi.GPIO at module load, so this module only imports on the Pi.
+
+Example:
+    motion = MotionService(MotionConfig())   # built-in default motor pinout
+    motion.initialize()
+    motion.wiggle(cycles=3)
+    motion.speak_audio("tmp/tts/reply.wav")
+    motion.shutdown()
+
+Orchestrator usage:
+    motion = MotionService(MotionConfig(motors={...}, pwm_frequency=1000, ...))
+    motion.initialize()
+    ...
+    motion.stop_all()
+    motion.shutdown()
+"""
+
 import threading
 import time
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Dict, Optional
 
 import RPi.GPIO as GPIO
+
+from services import Service, ServiceConfig, ServiceError
+
+
+class MotionServiceError(ServiceError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -19,7 +59,33 @@ class MotorConfig:
     neutral_return_time: float = 0.08
 
 
-class MotionService:
+def _default_motors() -> Dict[str, MotorConfig]:
+    return {
+        "mouth": MotorConfig(17, 27, 22, 82, 55, 0.04),
+        "tail":  MotorConfig(23, 24, 25, 72, 48, 0.03),
+        "body":  MotorConfig(5,  6,  12, 68, 45, 0.03),
+    }
+
+
+@dataclass(frozen=True)
+class MotionConfig(ServiceConfig):
+    module_name: str = "motion"
+
+    motors: Dict[str, MotorConfig] = field(default_factory=_default_motors)
+    pwm_frequency: int = 1000
+    body_wiggle_time: float = 0.18
+    tail_wiggle_time: float = 0.14
+    mouth_open_time: float = 0.09
+    mouth_close_time: float = 0.04
+    envelope_window_s: float = 0.18
+
+    def validate(self) -> bool:
+        if not self.motors:
+            raise MotionServiceError("No motors configured")
+        return True
+
+
+class MotionService(Service):
     """
     Non-blocking motion controller for a Billy Bass style fish.
 
@@ -36,23 +102,16 @@ class MotionService:
     - Uses BCM GPIO numbering.
     """
 
-    def __init__(
-        self,
-        motors: Dict[str, MotorConfig],
-        pwm_frequency: int = 1000,
-        body_wiggle_time: float = 0.18,
-        tail_wiggle_time: float = 0.14,
-        mouth_open_time: float = 0.09,
-        mouth_close_time: float = 0.04,
-        envelope_window_s: float = 0.18,
-    ) -> None:
-        self.motors = motors
-        self.pwm_frequency = pwm_frequency
-        self.body_wiggle_time = body_wiggle_time
-        self.tail_wiggle_time = tail_wiggle_time
-        self.mouth_open_time = mouth_open_time
-        self.mouth_close_time = mouth_close_time
-        self.envelope_window_s = envelope_window_s
+    def __init__(self, config: MotionConfig = MotionConfig()) -> None:
+        self.config = config
+        # Mirror config onto attributes the motor-control body already uses.
+        self.motors = config.motors
+        self.pwm_frequency = config.pwm_frequency
+        self.body_wiggle_time = config.body_wiggle_time
+        self.tail_wiggle_time = config.tail_wiggle_time
+        self.mouth_open_time = config.mouth_open_time
+        self.mouth_close_time = config.mouth_close_time
+        self.envelope_window_s = config.envelope_window_s
 
         self._pwms: Dict[str, GPIO.PWM] = {}
         self._queue: Queue = Queue()
@@ -66,6 +125,7 @@ class MotionService:
     # Public lifecycle
     # ---------------------------------------------------------------------
     def initialize(self) -> None:
+        self.config.validate()
         with self._lock:
             if self._initialized:
                 return
@@ -113,6 +173,20 @@ class MotionService:
 
             self._initialized = False
 
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "worker_alive": self._thread.is_alive() if self._thread else False,
+            "motors": list(self.motors.keys()),
+            "queue_size": self._queue.qsize(),
+        }
+
     # ---------------------------------------------------------------------
     # Public orchestrator-facing API
     # ---------------------------------------------------------------------
@@ -155,7 +229,7 @@ class MotionService:
             speed:      PWM duty cycle 0-100.
         """
         if not self._initialized:
-            raise RuntimeError("MotionService.initialize() must be called first")
+            raise MotionServiceError("MotionService.initialize() must be called first")
         if motor_name not in self.motors:
             raise ValueError(f"Unknown motor '{motor_name}'")
 
@@ -175,7 +249,7 @@ class MotionService:
         motions — use stop_all() for that.
         """
         if not self._initialized:
-            raise RuntimeError("MotionService.initialize() must be called first")
+            raise MotionServiceError("MotionService.initialize() must be called first")
 
         with self._lock:
             if motor_name is None:
@@ -193,7 +267,7 @@ class MotionService:
     # ---------------------------------------------------------------------
     def _enqueue(self, command: str, payload: dict) -> None:
         if not self._initialized:
-            raise RuntimeError("MotionService.initialize() must be called first")
+            raise MotionServiceError("MotionService.initialize() must be called first")
         self._queue.put((command, payload))
 
     def _worker_loop(self) -> None:
@@ -400,24 +474,3 @@ class MotionService:
             samples = mono_samples or samples
 
         return sum(samples) / len(samples)
-
-
-if __name__ == "__main__":
-    motors = {
-        "mouth": MotorConfig(in1=17, in2=27, en=22, forward_speed=82, reverse_speed=55, neutral_return_time=0.04),
-        "tail": MotorConfig(in1=23, in2=24, en=25, forward_speed=72, reverse_speed=48, neutral_return_time=0.03),
-        "body": MotorConfig(in1=5, in2=6, en=12, forward_speed=68, reverse_speed=45, neutral_return_time=0.03),
-    }
-
-    motion = MotionService(motors=motors)
-    motion.initialize()
-
-    try:
-        motion.wiggle(cycles=3)
-        time.sleep(2.0)
-        motion.open_mouth()
-        time.sleep(1.0)
-        motion.speak_text_placeholder(duration_s=3.0)
-        time.sleep(4.0)
-    finally:
-        motion.shutdown()

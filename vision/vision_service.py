@@ -1,7 +1,7 @@
 """
 vision_service.py
 
-Camera capture + image understanding for the Fishseus assistant.
+Thin camera capture + image-understanding service for Fishseus.
 
 Responsibilities:
 - Capture still frames from named camera sources:
@@ -9,10 +9,10 @@ Responsibilities:
     * "url" sources fetch a JPEG snapshot over HTTP (network cams, the future
       nerf-turret stream, anything that can serve a frame)
 - Describe frames with a vision-capable LLM through an OpenAI-compatible
-  endpoint (Ollama vision models such as qwen2.5vl, llava, moondream).
+  endpoint (Ollama vision models such as qwen2.5vl, llava, moondream)
 
 Non-responsibilities:
-- No motion logic, no assistant logic, no GPIO.
+- No motion logic, no assistant logic, no GPIO
 
 Config shape (config/fish_config.json "vision" section):
     {
@@ -21,21 +21,22 @@ Config shape (config/fish_config.json "vision" section):
       "timeout_s": 60,
       "capture_dir": "../tmp/vision",
       "cameras": {
-        "front": {
-          "type": "command",
-          "command": "rpicam-still -o {output} --width 1280 --height 720 --nopreview -t 500"
-        },
-        "turret": {
-          "type": "url",
-          "url": "http://turret.local:8080/snapshot.jpg"
-        }
+        "front":  {"type": "command", "command": "rpicam-still -o {output} --width 1280 --height 720 --nopreview -t 500"},
+        "turret": {"type": "url", "url": "http://turret.local:8080/snapshot.jpg"}
       }
     }
 
 Example:
     vision = VisionService(VisionConfig(cameras={...}))
-    frame = vision.capture("front")
-    print(vision.describe(frame, "What do you see?"))
+    vision.initialize()
+    print(vision.look("front", "What do you see?"))
+    vision.shutdown()
+
+Orchestrator usage:
+    vision = VisionService(VisionConfig(**config.get("vision", {})))
+    vision.initialize()
+    ...
+    vision.shutdown()
 """
 
 from __future__ import annotations
@@ -50,13 +51,17 @@ from typing import Any, Optional
 
 import requests
 
+from services import Service, ServiceConfig, ServiceError, ROOT_DIR
 
-class VisionServiceError(RuntimeError):
+
+class VisionServiceError(ServiceError):
     pass
 
 
 @dataclass(frozen=True)
-class VisionConfig:
+class VisionConfig(ServiceConfig):
+    module_name: str = "vision"
+
     # OpenAI-compatible chat endpoint that accepts image_url content parts.
     endpoint_url: str = "http://ollama.angelfish-gamma.ts.net/v1/chat/completions"
     model: str = "qwen2.5vl:3b"
@@ -67,7 +72,7 @@ class VisionConfig:
     temperature: float = 0.4
 
     # Where captured frames are written.
-    capture_dir: Path = Path("../tmp/vision")
+    capture_dir: Path = ROOT_DIR / "tmp" / "vision"
 
     # Named camera sources.  type: "command" (local capture binary) or
     # "url" (HTTP JPEG snapshot).  {output} in a command is replaced with
@@ -77,12 +82,49 @@ class VisionConfig:
     # Camera used when the caller doesn't name one.
     default_camera: str = ""
 
+    def validate(self) -> bool:
+        if not self.endpoint_url:
+            raise VisionServiceError("endpoint_url must be set")
+        if self.timeout_s <= 0:
+            raise VisionServiceError(f"timeout_s must be positive: {self.timeout_s}")
+        return True
 
-class VisionService:
+
+class VisionService(Service):
     def __init__(self, config: VisionConfig = VisionConfig()) -> None:
         self.config = config
         self.config.capture_dir.mkdir(parents=True, exist_ok=True)
-        self._session = requests.Session()
+        self._session: Optional[requests.Session] = requests.Session()
+        self._initialized = False
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    def initialize(self) -> None:
+        self.config.validate()
+        self.config.capture_dir.mkdir(parents=True, exist_ok=True)
+        if self._session is None:
+            self._session = requests.Session()
+        self._initialized = True
+
+    def shutdown(self) -> None:
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+        self._initialized = False
+
+    def reset(self) -> bool:
+        self.shutdown()
+        self.initialize()
+        return True
+
+    def status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "service": "ok" if self._initialized else "uninitialized",
+            "cameras": self.available_cameras(),
+            "default_camera": self.config.default_camera,
+        }
 
     # ------------------------------------------------------------------
     # Capture
@@ -152,8 +194,9 @@ class VisionService:
         if not url:
             raise VisionServiceError("Camera has no snapshot URL configured")
 
+        session = self._session or requests
         try:
-            resp = self._session.get(url, timeout=float(cam.get("timeout_s", 10.0)))
+            resp = session.get(url, timeout=float(cam.get("timeout_s", 10.0)))
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise VisionServiceError(f"Snapshot fetch failed: {exc}") from exc
@@ -195,8 +238,9 @@ class VisionService:
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
 
+        session = self._session or requests
         try:
-            resp = self._session.post(
+            resp = session.post(
                 self.config.endpoint_url,
                 headers=headers,
                 json=payload,
@@ -221,36 +265,3 @@ class VisionService:
         """Capture + describe in one call. Convenience for tools."""
         frame = self.capture(camera)
         return self.describe(frame, prompt)
-
-    def close(self) -> None:
-        self._session.close()
-
-
-# ----------------------------------------------------------------------
-# Manual test runner
-# ----------------------------------------------------------------------
-if __name__ == "__main__":
-    import sys
-
-    vision = VisionService(
-        VisionConfig(
-            cameras={
-                "front": {
-                    "type": "command",
-                    "command": "rpicam-still -o {output} --width 1280 --height 720 --nopreview -t 500",
-                },
-            },
-            default_camera="front",
-            capture_dir=Path("../tmp/vision"),
-        )
-    )
-
-    prompt = sys.argv[1] if len(sys.argv) > 1 else "Describe what you see."
-    try:
-        print("Capturing…")
-        frame = vision.capture()
-        print(f"Frame: {frame}")
-        print("Describing…")
-        print(vision.describe(frame, prompt))
-    finally:
-        vision.close()
