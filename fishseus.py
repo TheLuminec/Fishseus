@@ -180,7 +180,7 @@ class Fishseus:
         # TTS  — persistent=True keeps piper loaded in memory
         _log("init", "Starting TTS service (persistent piper daemon)…")
         self.tts = TtsService(TtsConfig(
-            piper_binary  = str((config_dir / tts_cfg.get("piper_binary", "../tts/.venv/bin/piper")).resolve()),
+            piper_binary  = Path(str((config_dir / tts_cfg.get("piper_binary", "../tts/.venv/bin/piper")).resolve())),
             voices_dir    = Path((config_dir / tts_cfg.get("voices_dir", "../tts/voices")).resolve()),
             default_voice = tts_cfg.get("default_voice", "en_US-arctic-medium"),
             audio_device  = tts_cfg.get("audio_device", "plughw:0,0"),
