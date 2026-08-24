@@ -205,6 +205,57 @@ class MemoryStore:
             }
         )
 
+    # Words ignored when matching a "forget" request against stored facts.
+    _FORGET_STOPWORDS = {
+        "the", "a", "an", "my", "your", "that", "this", "about", "of", "for",
+        "to", "is", "and", "please", "fishseus", "forget", "delete", "remove",
+        "erase", "remember", "memory", "everything",
+    }
+
+    def forget_fact(self, query: str) -> list[dict[str, Any]]:
+        """
+        Remove remembered facts matching ``query`` and return the ones removed.
+
+        Matching is deliberately forgiving because the query arrives via speech:
+        an exact key match wins; otherwise every meaningful word in the query
+        must appear somewhere in a fact's key or value. Returns [] (and changes
+        nothing) when nothing matches. Callers persist via save().
+        """
+        facts = self.data.get("facts", [])
+        if not isinstance(facts, list) or not facts:
+            return []
+
+        q = query.strip().lower()
+        if q.startswith("facts."):
+            q = q[len("facts."):]
+        q = q.strip()
+        if not q:
+            return []
+
+        def haystack(fact: dict[str, Any]) -> str:
+            text = f"{fact.get('key', '')} {fact.get('value', '')}".lower()
+            return text.replace("_", " ")
+
+        exact = [f for f in facts if str(f.get("key", "")).lower() == q]
+        if exact:
+            matches = exact
+        else:
+            tokens = [
+                t for t in re.split(r"[^a-z0-9]+", q)
+                if len(t) >= 2 and t not in self._FORGET_STOPWORDS
+            ]
+            if tokens:
+                matches = [f for f in facts if all(t in haystack(f) for t in tokens)]
+            else:
+                matches = [f for f in facts if q in haystack(f)]
+
+        if not matches:
+            return []
+
+        remove_ids = {id(f) for f in matches}
+        self.data["facts"] = [f for f in facts if id(f) not in remove_ids]
+        return matches
+
     @staticmethod
     def _default_memory(assistant_name: str, user_name: str) -> dict[str, Any]:
         return {

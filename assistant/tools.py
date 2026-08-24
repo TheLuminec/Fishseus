@@ -168,6 +168,24 @@ def build_tool_registry(
         print(f"[memory] → recall_memory called ({summary.count(chr(10)) + 1} lines)", flush=True)
         return summary
 
+    def forget(key: str = "") -> str:
+        asst = get_assistant()
+        if asst is None:
+            return "Memory not available"
+        query = (key or "").strip()
+        if not query:
+            return "Nothing specified to forget"
+        removed = asst.memory.forget_fact(query)
+        if not removed:
+            return f"No remembered fact matched '{query}'"
+        asst.memory.save()
+        labels = ", ".join(f"{r.get('key', '')} ({r.get('value', '')})" for r in removed)
+        print(f"[memory] ✗ Forgot {len(removed)} fact(s): {labels}", flush=True)
+        if len(removed) == 1:
+            r = removed[0]
+            return f"Forgot {r.get('key', '')}: {r.get('value', '')}"
+        return f"Forgot {len(removed)} memories: {labels}"
+
     def look(camera: str = "", question: str = "") -> str:
         vision = get_vision()
         if vision is None:
@@ -212,6 +230,7 @@ def build_tool_registry(
         Tool("roll_dice",        "Roll dice. Args: sides int (default 6), count int (default 1).",        roll_dice,        "safe",  True,         False),
         Tool("calculate",        "Evaluate a math expression. Args: expression string.",                  calculate,        "safe",  True,         False),
         Tool("recall_memory",    "Read everything remembered about the user. No args.",                   recall_memory,    "safe",  True,         True),
+        Tool("forget",           "Delete a remembered fact. Args: key — the fact's key or a few words describing it.", forget, "safe", True, True),
         Tool("clear_session",    "Clear conversation history for a completely fresh start. No args.",      clear_session,    "safe",  False,        False),
         Tool("look",             "Look through the camera and describe what is seen. Args: camera string (optional name), question string (optional, what to look for).", look, "safe", True, True),
         Tool("check_sensors",    "Check when each sensor (motion detector etc.) last triggered. No args.", check_sensors,    "safe",  True,         False),
