@@ -156,13 +156,25 @@ class TtsService(Service):
     # Synthesis
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Collapse all whitespace (including newlines) into single spaces.
+
+        Piper reads ONE line of text per synthesis and writes one WAV per line.
+        If an utterance contains embedded newlines, piper emits several WAVs and
+        only the first is collected — so a multi-sentence reply would lose every
+        sentence after the first. Flattening to a single line keeps the whole
+        utterance in one WAV; sentence punctuation still drives natural pauses.
+        """
+        return " ".join((text or "").split())
+
     def synthesize(
         self,
         text: str,
         output_path: Optional[str | Path] = None,
         voice: Optional[str] = None,
     ) -> Path:
-        text = text.strip()
+        text = self._normalize_text(text)
         if not text:
             raise TtsServiceError("Cannot synthesize empty text")
 
