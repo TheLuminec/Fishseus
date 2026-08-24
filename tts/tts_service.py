@@ -80,6 +80,17 @@ class TtsConfig(ServiceConfig):
 
 
 class TtsService(Service):
+    # Throwaway line sent after each real utterance. piper writes one WAV per
+    # stdin line and closes each file before opening the next, so the appearance
+    # of the sentinel's WAV is proof the real utterance's WAV is fully written.
+    # Must be non-empty (piper skips blank lines); content is never played.
+    _SENTINEL_TEXT = "ok"
+
+    # Fallback only: if the sentinel ever fails to produce a file, accept the
+    # utterance once its size has been static this long. Generous so it never
+    # fires during a normal between-sentence synthesis gap.
+    _FALLBACK_SETTLE_S = 2.0
+
     def __init__(self, config: TtsConfig = TtsConfig()) -> None:
         self.config = config
         self.current_voice = config.default_voice
@@ -207,20 +218,29 @@ class TtsService(Service):
         """Speak one line to the resident piper process and collect its WAV.
 
         piper (>=1.4) has no JSON protocol.  In --output-dir mode it stays
-        resident, reading one line of text per synthesis from stdin and
-        writing a timestamped WAV into the daemon output dir.  We clear the
-        dir, send the line, wait for the new file to appear and finish
-        writing, then move it to output_path.
+        resident, reading one line of text per synthesis from stdin and writing
+        one nanosecond-timestamped WAV per line into the daemon output dir.
+
+        We clear the dir, send the real line, then send a throwaway sentinel
+        line.  piper processes lines in order and closes each file before
+        opening the next, so once the sentinel's WAV appears the real
+        utterance's WAV is guaranteed complete.  We move that first WAV to
+        output_path and leave the sentinel behind (cleared on the next call).
+
+        This replaces the old size-settle heuristic, which moved the WAV out
+        from under piper during the brief synthesis gap between sentences and
+        cut playback off after the first sentence.
         """
         proc = self._daemon_proc
 
         with self._daemon_lock:
-            # Empty the dir so the only WAV that shows up is this call's.
+            # Empty the dir so only this call's WAVs show up.
             for stale in self._daemon_out_dir.glob("*.wav"):
                 stale.unlink(missing_ok=True)
 
             try:
                 proc.stdin.write(text + "\n")
+                proc.stdin.write(self._SENTINEL_TEXT + "\n")
                 proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 raise TtsServiceError(
@@ -233,35 +253,42 @@ class TtsService(Service):
         return output_path
 
     def _await_daemon_wav(self, proc: subprocess.Popen) -> Path:
-        """Wait for piper to write a WAV into the (pre-cleared) output dir and
-        finish flushing it.  Returns the path of that file.
+        """Wait for the utterance WAV to be fully written, then return its path.
+
+        The utterance is the OLDEST WAV in the (pre-cleared) output dir.  It is
+        complete once a second WAV — the sentinel's — appears, because piper
+        closes each file before opening the next.  A size-settle fallback covers
+        the unlikely case the sentinel produced no file, so we never grab a WAV
+        mid-write.
         """
         deadline = time.monotonic() + self.config.timeout_s
-        candidate: Optional[Path] = None
+        first: Optional[Path] = None
         last_size = -1
-        stable = 0
+        last_change = time.monotonic()
 
         while True:
-            if candidate is None:
-                found = sorted(self._daemon_out_dir.glob("*.wav"))
-                if found:
-                    candidate = found[0]
-            else:
+            wavs = sorted(self._daemon_out_dir.glob("*.wav"))
+            if wavs:
+                first = wavs[0]
+                # Sentinel WAV present -> the utterance WAV is closed & complete.
+                if len(wavs) >= 2:
+                    return first
+                # Fallback: only the utterance WAV so far. Accept it once its
+                # size has held steady long enough that piper is surely done.
                 try:
-                    size = candidate.stat().st_size
+                    size = first.stat().st_size
                 except FileNotFoundError:
-                    candidate, size = None, -1
-                # A WAV header is 44 bytes; wait for the size to settle so we
-                # don't move the file out from under piper mid-write.
-                if candidate is not None and size == last_size and size > 44:
-                    stable += 1
-                    if stable >= 2:
-                        return candidate
-                else:
-                    stable = 0
-                last_size = size
+                    size = -1
+                now = time.monotonic()
+                if size != last_size:
+                    last_size = size
+                    last_change = now
+                elif size > 44 and (now - last_change) >= self._FALLBACK_SETTLE_S:
+                    return first
 
             if time.monotonic() > deadline:
+                if first is not None:
+                    return first  # speak what we have rather than failing outright
                 raise TtsServiceError("Piper daemon synthesis timed out")
             if proc.poll() is not None:
                 raise TtsServiceError(

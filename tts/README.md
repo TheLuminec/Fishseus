@@ -60,9 +60,19 @@ JSON daemon protocol. The resident daemon uses Piper's `--output-dir` mode:
 - On `initialize()`, Piper is launched once with the default voice loaded and
   `--output-dir <output_dir>/_daemon --output-dir-naming timestamp`, staying
   resident with the ONNX model warm in memory.
-- Each `synthesize()` call clears the daemon dir, writes one line of text to
-  Piper's stdin, waits for the resulting WAV to appear and finish flushing
-  (its size settles), then moves it to the requested `output_path`.
+- Each `synthesize()` call flattens the text to a single line (so the whole
+  utterance is one WAV — see below), clears the daemon dir, then writes the real
+  line followed by a short throwaway **sentinel** line to Piper's stdin. Piper
+  writes one WAV per line and closes each file before opening the next, so the
+  moment the sentinel's WAV appears the real utterance's WAV is guaranteed
+  complete. That first WAV is moved to `output_path`; the sentinel is discarded.
+  A size-settle fallback covers the rare case the sentinel yields no file.
+- Why the sentinel: Piper renders a multi-sentence line sentence by sentence with
+  a synthesis gap between them. The previous approach grabbed the WAV as soon as
+  its size stopped growing for ~40 ms, which fired **during** that gap and cut
+  playback off after the first sentence. Waiting for the sentinel removes the
+  timing guess entirely. Input is flattened to one line first so a stray newline
+  can't split the utterance into multiple files and defeat the sentinel.
 - If the daemon isn't running (or `persistent=False`, or a different voice is
   requested), synthesis falls back to a fresh one-shot Piper subprocess using
   `--output_file`.
