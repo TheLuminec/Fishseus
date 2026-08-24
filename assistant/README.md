@@ -44,13 +44,16 @@ orchestrator wires in), and it doesn't know which model/server is behind
   utterance (wake word already stripped upstream).
 - `handle_sensor_event(description) -> AssistantResult` – let the fish decide how
   to react to a sensor trigger.
-- `formulate_tool_response(command, tool_results) -> str` – turn tool output into
-  a natural spoken reply.
+- `formulate_tool_response(command, tool_results) -> (speak, motion)` – fold tool
+  output into a single natural spoken reply and its matching motion.
+- `set_last_response(text)` – overwrite the latest assistant history entry with the
+  text actually spoken, so silent tool calls and formulated answers stay in history.
 - `clear_history()` – drop in-memory conversation history.
 
 `AssistantResult` carries `speak`, `motion`, `tool_calls`, `tool_results`,
 `memory_updates`, and `elapsed_s`. The orchestrator sends `speak` to TTS and uses
-`motion`/tool results to drive animation.
+`motion`/tool results to drive animation. `speak` may be an empty string when the
+fish acts silently (a bare action, or a tool call whose result is spoken afterward).
 
 ## How it works
 

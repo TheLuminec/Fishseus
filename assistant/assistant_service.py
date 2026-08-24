@@ -48,6 +48,10 @@ class AssistantServiceError(ServiceError):
     pass
 
 
+# Motions the model may request. Anything outside this set falls back to "speaking".
+VALID_MOTIONS = {"idle", "speaking", "happy", "annoyed", "thinking", "excited"}
+
+
 # ----------------------------------------------------------------------
 # Data models
 # ----------------------------------------------------------------------
@@ -432,10 +436,39 @@ class AssistantService(Service):
         result.tool_results = [self.tool_registry.execute(call) for call in result.tool_calls]
 
         self._append_history("user", clean_user_text)
-        self._append_history("assistant", result.speak)
+        # For silent turns (empty speak, e.g. a wiggle or a tool call whose result
+        # is spoken later) record a short note so the turn isn't a blank entry.
+        # The orchestrator replaces this with the real spoken text via
+        # set_last_response() once tool results are formulated.
+        self._append_history("assistant", result.speak or self._history_action_note(result))
         self._log_turn(clean_user_text, result)
 
         return result
+
+    @staticmethod
+    def _history_action_note(result: AssistantResult) -> str:
+        if result.tool_calls:
+            names = ", ".join(c.name for c in result.tool_calls)
+            return f"(acted silently: {names})"
+        return "(no reply)"
+
+    def set_last_response(self, text: str) -> None:
+        """
+        Overwrite the most recent assistant history entry with the text that was
+        actually spoken.
+
+        handle_user_text() records the model's first-pass "speak" (which may be
+        empty for a silent tool call). After the orchestrator runs the tools and
+        formulates the real answer, it calls this so conversation history reflects
+        what the fish truly said rather than a blank placeholder.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        for entry in reversed(self.history):
+            if entry.get("role") == "assistant":
+                entry["content"] = text
+                return
 
     def handle_sensor_event(self, event_description: str) -> AssistantResult:
         """
@@ -475,7 +508,7 @@ class AssistantService(Service):
         parsed = llm_result.parse_json_content()
         speak = str((parsed or {}).get("speak") or "").strip()
         motion = str((parsed or {}).get("motion") or "speaking").strip().lower()
-        if motion not in {"idle", "speaking", "happy", "annoyed", "thinking", "excited"}:
+        if motion not in VALID_MOTIONS:
             motion = "speaking"
 
         return AssistantResult(
@@ -490,13 +523,13 @@ class AssistantService(Service):
         self,
         user_text: str,
         tool_results: list[dict[str, Any]],
-    ) -> str:
+    ) -> tuple[str, str]:
         """
-        Second-turn LLM call: given what the user asked and the data returned
-        by synthesize_result tools, generate a natural spoken Fishseus response.
+        Second-turn LLM call: given what the user asked and the data returned by
+        tools, generate a single natural spoken Fishseus response.
 
-        Returns the spoken text string (not a full AssistantResult — this is a
-        lightweight follow-up, not a full assistant turn).
+        Returns (speak, motion). This is a lightweight follow-up, not a full
+        assistant turn, so it does not touch history, memory, or further tools.
         """
         results_text = "\n".join(
             f"{r['tool']}: {r['result']}"
@@ -515,8 +548,10 @@ class AssistantService(Service):
             {
                 "role": "user",
                 "content": (
-                    f"Your tools returned this data:\n{results_text}\n\n"
-                    "Give your final spoken response incorporating this data. "
+                    f"You just checked, and this is what came back:\n{results_text}\n\n"
+                    "Now give your spoken answer to the original request, folding this "
+                    "information naturally into one reply in your own voice. Do not read "
+                    "the raw data verbatim. Keep it to a sentence or two. "
                     'Reply as valid JSON with only "speak" and "motion" fields.'
                 ),
             },
@@ -526,16 +561,23 @@ class AssistantService(Service):
                 messages,
                 temperature=self.config.temperature,
                 max_tokens=200,
+                response_format={"type": "json_object"},
             )
             parsed = llm_result.parse_json_content()
-            if parsed and parsed.get("speak"):
-                return str(parsed["speak"]).strip()
-            # Fallback: clean up raw content if JSON parse failed
+            motion = str((parsed or {}).get("motion") or "speaking").strip().lower()
+            if motion not in VALID_MOTIONS:
+                motion = "speaking"
+            if parsed and str(parsed.get("speak") or "").strip():
+                return str(parsed["speak"]).strip(), motion
+            # JSON parse failed or produced empty speak — salvage plain content,
+            # but never speak a raw JSON blob aloud.
             content = llm_result.content.strip()
-            return content[:300] if content else results_text
+            if content and not content.startswith(("{", "[")):
+                return content[:300], "speaking"
+            return results_text, "speaking"
         except Exception as exc:
             print(f"[AssistantService] formulate_tool_response failed: {exc}")
-            return results_text  # speak the raw data rather than going silent
+            return results_text, "speaking"  # speak the raw data rather than going silent
 
     # ------------------------------------------------------------------
     # Prompt building
@@ -634,15 +676,18 @@ Rules:
             )
 
         speak = str(parsed.get("speak") or "").strip()
-        if not speak:
+        tool_calls = self._parse_tool_calls(parsed.get("tool_calls", []))
+        memory_updates = self._parse_memory_updates(parsed.get("memory_updates", []))
+
+        # An empty "speak" is intentional when the fish is acting silently or
+        # calling a tool whose result gets spoken afterward. Only substitute a
+        # fallback line when there is genuinely nothing to say AND nothing to do.
+        if not speak and not tool_calls:
             speak = self._fallback_speak(raw_text)
 
         motion = str(parsed.get("motion") or "speaking").strip().lower()
-        if motion not in {"idle", "speaking", "happy", "annoyed", "thinking", "excited"}:
+        if motion not in VALID_MOTIONS:
             motion = "speaking"
-
-        tool_calls = self._parse_tool_calls(parsed.get("tool_calls", []))
-        memory_updates = self._parse_memory_updates(parsed.get("memory_updates", []))
 
         return AssistantResult(
             speak=speak,

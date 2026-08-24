@@ -375,30 +375,50 @@ class Fishseus:
 
         _log("assistant", f"speak='{result.speak}'  motion={result.motion}  tools={[c.name for c in result.tool_calls]}  elapsed={result.elapsed_s:.2f}s")
 
-        # Partition tool results by how their data should be delivered.
-        raw_snippets = [
-            str(r["result"])
-            for r in result.tool_results
-            if r.get("ok") and r.get("returns_data") and not r.get("synthesize_result")
-            and r.get("result") is not None
-        ]
-        synth_results = [
+        has_speak = bool(result.speak and result.speak.strip())
+
+        # Successful tool results that carry information back to be spoken.
+        data_results = [
             r for r in result.tool_results
-            if r.get("ok") and r.get("synthesize_result") and r.get("result") is not None
+            if r.get("ok") and r.get("returns_data") and r.get("result") is not None
         ]
 
-        if synth_results:
-            # Speak the thinking placeholder first (no cooldown gap).
-            self._speak_with_motion(result.speak, result.motion, cooldown=False)
-            # Ask the LLM to formulate a natural spoken response from the returned data.
-            synthesized = self.assistant.formulate_tool_response(command, synth_results)
-            self._speak_with_motion(synthesized, "speaking", cooldown=True)
-        elif raw_snippets:
-            # Two-phase: thinking placeholder then speak the raw value directly.
-            self._speak_with_motion(result.speak, result.motion, cooldown=False)
-            self._speak_with_motion(" ".join(raw_snippets), "speaking", cooldown=True)
-        else:
+        spoken_parts: list[str] = []
+
+        if data_results:
+            # If the fish chose to say a line, speak it first as banter while it
+            # "checks" — keep the mic suppressed so there's no gap before the answer.
+            if has_speak:
+                self._speak_with_motion(result.speak, result.motion, cooldown=False)
+                spoken_parts.append(result.speak)
+
+            # Rich data (weather, vision, memory) always gets folded into a spoken
+            # sentence by the LLM. Short raw values (time, dice, math) can be spoken
+            # directly ONLY when the fish already gave a line — otherwise we still
+            # formulate so a silent tool call yields one natural, in-character reply.
+            needs_synthesis = any(r.get("synthesize_result") for r in data_results)
+            if needs_synthesis or not has_speak:
+                answer, answer_motion = self.assistant.formulate_tool_response(command, data_results)
+            else:
+                answer = " ".join(str(r["result"]) for r in data_results)
+                answer_motion = "speaking"
+
+            self._speak_with_motion(answer, answer_motion, cooldown=True)
+            spoken_parts.append(answer)
+
+        elif has_speak:
             self._speak_with_motion(result.speak, result.motion, cooldown=True)
+            spoken_parts.append(result.speak)
+
+        else:
+            # Silent turn: an action-only tool call (e.g. wiggle) already ran, or
+            # the model had nothing to say. Stay quiet rather than inventing filler.
+            _log("assistant", "Silent turn — no speech.")
+
+        # Record what was actually spoken so conversation history stays coherent
+        # (handle_user_text only saw the first-pass placeholder).
+        if spoken_parts:
+            self.assistant.set_last_response(" ".join(spoken_parts))
 
     # -------------------------------------------------------------------
     # Speaking (mic suppression + TTS + motion)
