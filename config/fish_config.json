@@ -85,5 +85,13 @@
     "enabled": false,
     "poll_interval_s": 0.05,
     "sensors": []
+  },
+  "web": {
+    "bind_host": "127.0.0.1",
+    "auth_enabled": true,
+    "cf_access_team_domain": "",
+    "cf_access_aud": "",
+    "local_bypass_token": "",
+    "devices_cache_ttl_s": 60.0
   }
 }

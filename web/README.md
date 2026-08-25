@@ -13,21 +13,29 @@ The `web` module provides a Flask-based web server and a modernized, responsive,
 
 ## Prerequisites
 
-The web server relies on `flask`. Ensure it is installed:
+The web server needs `flask` (and `PyJWT[crypto]` for Cloudflare Access). On the
+Pi, install them into a virtualenv created with `--system-site-packages` so the
+hardware services (`RPi.GPIO`, `gpiozero`, `requests`) remain importable:
 
 ```bash
-pip install flask
+python -m venv web/.venv --system-site-packages
+web/.venv/bin/pip install -r web/requirements.txt
 ```
 
 ## Usage
 
-Start the web server:
+Run with the venv's interpreter (the orchestrator imports the web server
+in-process, so it needs the same interpreter):
 
 ```bash
-python web/web_server.py [port]
+web/.venv/bin/python web/web_server.py [port]     # standalone panel
+web/.venv/bin/python fishseus.py --port 8000      # full assistant + web UI
 ```
 
-By default, the server binds to `0.0.0.0:8000`. Open `http://<your-pi-ip>:8000/` in a browser.
+By default the server now binds to **`127.0.0.1:8000`** (loopback only), intended
+to sit behind a Cloudflare Tunnel — see [DEPLOYMENT.md](DEPLOYMENT.md). For plain
+LAN access, set `FISHSEUS_BIND_HOST=0.0.0.0` (or `web.bind_host` in the config)
+and open `http://<your-pi-ip>:8000/`.
 
 ## API Endpoints
 

@@ -1149,9 +1149,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================================================================
     // Device discovery (mics / speakers / cameras)
     // =====================================================================
-    async function loadDevices() {
+    let devicesLoaded = false;
+    async function loadDevices(force = false) {
         try {
-            const data = await api('GET', '/api/devices');
+            const data = await api('GET', '/api/devices' + (force ? '?refresh=1' : ''));
+            devicesLoaded = true;
             populateDeviceSelect('audio_device_select', data.capture || []);
             populateDeviceSelect('tts_device_select', data.playback || []);
             renderDetectedCameras(data.cameras || []);
@@ -1212,15 +1214,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.value) setVal('tts_audio_device', e.target.value);
     });
     document.getElementById('btn-refresh-mics').addEventListener('click', async () => {
-        const d = await loadDevices();
+        const d = await loadDevices(true);
         showToast(d ? `Found ${(d.capture || []).length} capture device(s)` : 'Device scan failed', d ? 'info' : 'error');
     });
     document.getElementById('btn-refresh-speakers').addEventListener('click', async () => {
-        const d = await loadDevices();
+        const d = await loadDevices(true);
         showToast(d ? `Found ${(d.playback || []).length} playback device(s)` : 'Device scan failed', d ? 'info' : 'error');
     });
     document.getElementById('btn-refresh-cameras').addEventListener('click', async () => {
-        const d = await loadDevices();
+        const d = await loadDevices(true);
         showToast(d ? `Found ${(d.cameras || []).length} camera(s)` : 'Device scan failed', d ? 'info' : 'error');
     });
 
@@ -1957,6 +1959,9 @@ document.addEventListener('DOMContentLoaded', () => {
         _origSwitch2(name);
         if (name === 'tools') loadTools();
         if (name === 'memory') { loadMemory(); loadHistory(); }
+        // Probe hardware devices lazily, only when a section that uses them is
+        // first opened (avoids the subprocess-heavy scan on dashboard load).
+        if ((name === 'audio' || name === 'vision') && !devicesLoaded) loadDevices();
         if (name !== 'vision') stopVisionRefresh();
     };
 
@@ -1985,7 +1990,8 @@ document.addEventListener('DOMContentLoaded', () => {
     loadConfig();
     loadPersonality();
     loadStatus();
-    loadDevices();
+    // Devices are probed lazily (subprocess-heavy) the first time the Audio or
+    // Vision section is opened — keeps the initial dashboard load light.
     switchSection('dashboard');
 });
 </script>

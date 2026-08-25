@@ -9,15 +9,19 @@ reported as "unavailable" in the API and their controls are disabled in
 the UI.
 
 Usage:
-    pip install flask
-    python web_server.py [port]
+    python -m venv web/.venv --system-site-packages
+    web/.venv/bin/pip install -r web/requirements.txt
+    web/.venv/bin/python web/web_server.py [port]
 
-The server binds to 0.0.0.0 on the given port (default 8000).
+The server binds to 127.0.0.1 by default (loopback only, intended to sit behind
+a Cloudflare Tunnel).  Override with FISHSEUS_BIND_HOST or the web.bind_host
+config key (e.g. 0.0.0.0 for LAN access).  See web/DEPLOYMENT.md.
 """
 
 from __future__ import annotations
 
 import atexit
+import copy
 import json
 import re
 import subprocess
@@ -28,6 +32,14 @@ from collections import deque
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+
+# Access control / hardening lives in a sibling module.  Support both import
+# styles: package import (via fishseus.py -> web.web_server) and standalone
+# (python web/web_server.py, where web/ is on sys.path[0]).
+try:
+    from . import security
+except ImportError:  # running as a script
+    import security  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------
 # Path setup
@@ -182,6 +194,17 @@ DEFAULT_CONFIG: dict[str, object] = {
         "poll_interval_s": 0.05,
         "sensors": [],
     },
+    # Web server / access control.  Secrets (local_bypass_token) are better set
+    # via environment variables (FISHSEUS_*) since this file is committed to git;
+    # see web/security.py.  These are the non-secret defaults.
+    "web": {
+        "bind_host": "127.0.0.1",
+        "auth_enabled": True,
+        "cf_access_team_domain": "",
+        "cf_access_aud": "",
+        "local_bypass_token": "",
+        "devices_cache_ttl_s": 60.0,
+    },
 }
 
 
@@ -189,27 +212,57 @@ DEFAULT_CONFIG: dict[str, object] = {
 # Configuration helpers
 # ---------------------------------------------------------------------
 
+# Config is read on nearly every request (the amplitude graph polls at ~2 Hz),
+# so we cache the parsed+merged result and only re-read when the file's mtime
+# changes.  This removes repeated disk I/O and JSON parsing from the hot path.
+_config_cache: dict[str, object] | None = None
+_config_mtime: float | None = None
+_config_lock = threading.Lock()
+
+
+def _merge_defaults(data: dict) -> dict[str, object]:
+    merged = copy.deepcopy(DEFAULT_CONFIG)
+    for key, val in data.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(val, dict):
+            merged[key].update(val)
+        else:
+            merged[key] = val
+    return merged
+
+
 def load_config() -> dict[str, object]:
-    """Load the configuration from disk or return defaults."""
-    if not CONFIG_FILE.exists():
-        return json.loads(json.dumps(DEFAULT_CONFIG))
-    try:
-        with CONFIG_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        merged = json.loads(json.dumps(DEFAULT_CONFIG))
-        for key, val in data.items():
-            if key in merged and isinstance(merged[key], dict) and isinstance(val, dict):
-                merged[key].update(val)
-            else:
-                merged[key] = val
-        return merged
-    except Exception:
-        return json.loads(json.dumps(DEFAULT_CONFIG))
+    """Load the configuration (cached, invalidated on file mtime change).
+
+    Returns a deep copy so callers may freely mutate the result without
+    corrupting the cache.
+    """
+    global _config_cache, _config_mtime
+
+    with _config_lock:
+        if not CONFIG_FILE.exists():
+            return copy.deepcopy(DEFAULT_CONFIG)
+        try:
+            mtime = CONFIG_FILE.stat().st_mtime
+            if _config_cache is None or mtime != _config_mtime:
+                with CONFIG_FILE.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _config_cache = _merge_defaults(data)
+                _config_mtime = mtime
+            return copy.deepcopy(_config_cache)
+        except Exception:
+            return copy.deepcopy(DEFAULT_CONFIG)
 
 
 def save_config(config: dict[str, object]) -> None:
-    """Write the configuration to disk."""
+    """Write the configuration to disk and refresh the in-memory cache."""
+    global _config_cache, _config_mtime
     CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    with _config_lock:
+        _config_cache = copy.deepcopy(config)
+        try:
+            _config_mtime = CONFIG_FILE.stat().st_mtime
+        except Exception:
+            _config_mtime = None
 
 
 # ---------------------------------------------------------------------
@@ -530,6 +583,40 @@ def shutdown_services() -> None:
 
 app = Flask(__name__)
 
+# Reject oversized request bodies outright (defends the JSON parsers).
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MiB
+
+
+# --- Access control & hardening (see web/security.py) ---
+
+# Endpoints reachable without authentication.  Keep this minimal: /healthz is
+# for tunnel / uptime probes and leaks nothing.
+_AUTH_EXEMPT = {"/healthz"}
+
+
+@app.before_request
+def _enforce_auth():
+    if request.method == "OPTIONS" or request.path in _AUTH_EXEMPT:
+        return None
+    if not security.csrf_ok(request):
+        return jsonify({"error": "Cross-origin request rejected"}), 403
+    web_conf = load_config().get("web", {})
+    allowed, message, status = security.authorize(request, web_conf)
+    if not allowed:
+        return jsonify({"error": message}), status
+    return None
+
+
+@app.after_request
+def _add_security_headers(response):
+    return security.apply_security_headers(response)
+
+
+@app.route("/healthz")
+def healthz():
+    """Unauthenticated liveness probe for the tunnel / uptime monitors."""
+    return jsonify({"status": "ok"})
+
 
 # --- Static files ---
 
@@ -542,7 +629,9 @@ def index():
 @app.route("/styles.css")
 def serve_css():
     """Serve the stylesheet."""
-    return send_from_directory(str(ROOT_DIR), "styles.css", mimetype="text/css")
+    return send_from_directory(
+        str(ROOT_DIR), "styles.css", mimetype="text/css", max_age=3600
+    )
 
 
 # --- Status ---
@@ -667,14 +756,42 @@ def _list_cameras() -> list[dict]:
     return cameras
 
 
+# Device discovery spawns subprocesses (arecord/aplay -l, rpicam-hello) which is
+# expensive on a Pi.  The UI calls this on every page load, so cache the result
+# for a short TTL; hardware rarely changes between page loads.  Pass ?refresh=1
+# to force a rescan.
+_devices_cache: dict | None = None
+_devices_cache_ts: float = 0.0
+_devices_lock = threading.Lock()
+
+
 @app.route("/api/devices")
 def api_devices():
     """List available capture, playback, and camera devices on this machine."""
-    return jsonify({
+    global _devices_cache, _devices_cache_ts
+
+    ttl = float(load_config().get("web", {}).get("devices_cache_ttl_s", 60.0))
+    force = request.args.get("refresh") in ("1", "true", "yes")
+
+    with _devices_lock:
+        fresh = (
+            _devices_cache is not None
+            and not force
+            and (time.time() - _devices_cache_ts) < ttl
+        )
+        if fresh:
+            return jsonify(_devices_cache)
+
+    # Do the (slow) discovery outside the lock so concurrent callers don't block.
+    result = {
         "capture": _list_alsa_devices("arecord"),
         "playback": _list_alsa_devices("aplay"),
         "cameras": _list_cameras(),
-    })
+    }
+    with _devices_lock:
+        _devices_cache = result
+        _devices_cache_ts = time.time()
+    return jsonify(result)
 
 
 # --- Audio amplitude streaming ---
@@ -1035,7 +1152,7 @@ if __name__ == "__main__":
 
     # Ensure a config file exists on disk
     if not CONFIG_FILE.exists():
-        save_config(json.loads(json.dumps(DEFAULT_CONFIG)))
+        save_config(copy.deepcopy(DEFAULT_CONFIG))
 
     # Start services
     init_services()
@@ -1045,5 +1162,12 @@ if __name__ == "__main__":
     if unavailable:
         print(f"[web] Unavailable services (graceful degradation): {', '.join(unavailable)}")
 
-    print(f"[web] Serving Fishseus control panel on http://0.0.0.0:{port}/")
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    # Bind loopback-only by default; cloudflared reaches us locally.  Override
+    # with FISHSEUS_BIND_HOST or web.bind_host (e.g. 0.0.0.0 for LAN access).
+    web_conf = load_config().get("web", {})
+    host = security.resolve_settings(web_conf)["bind_host"]
+    for line in security.startup_report(web_conf):
+        print(line)
+
+    print(f"[web] Serving Fishseus control panel on http://{host}:{port}/")
+    app.run(host=host, port=port, debug=False, threaded=True)

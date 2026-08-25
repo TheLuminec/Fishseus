@@ -1,0 +1,19 @@
+# Web control panel dependencies.
+#
+# On the Raspberry Pi, install into a venv that can also see the system
+# hardware packages (RPi.GPIO, gpiozero, requests), then run the app with that
+# venv's interpreter:
+#   python -m venv web/.venv --system-site-packages
+#   web/.venv/bin/pip install -r web/requirements.txt
+#   web/.venv/bin/python fishseus.py        # or web/web_server.py
+
+Flask>=2.2
+
+# Required for Cloudflare Access JWT verification (public hosting).
+# Without it, tunnel traffic is denied fail-closed when Access is enabled.
+PyJWT[crypto]>=2.6
+
+# Recommended production WSGI server (replaces Flask's dev server).
+# See deployment notes; run with e.g.:
+#   waitress-serve --host 127.0.0.1 --port 8000 web.web_server:app
+waitress>=2.1

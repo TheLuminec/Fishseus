@@ -528,7 +528,16 @@ class Fishseus:
 
     def _start_web_server(self) -> None:
         try:
-            import web.web_server as _web
+            try:
+                import web.web_server as _web
+            except ModuleNotFoundError as exc:
+                # Almost always: launched with an interpreter that lacks Flask.
+                # The web deps live in web/.venv (see web/DEPLOYMENT.md) — run
+                # the orchestrator with web/.venv/bin/python so the in-process
+                # import resolves.
+                _log("web", f"Web UI disabled: {exc}. Run with the web venv, e.g. "
+                            "web/.venv/bin/python fishseus.py")
+                return
             _web.set_services(
                 audio     = self.audio,
                 llm       = self.llm,
@@ -540,10 +549,19 @@ class Fishseus:
             )
             if self.assistant is not None:
                 _web.set_tool_registry(self.assistant.tool_registry)
+
+            # Bind loopback-only by default so nothing is exposed directly;
+            # cloudflared reaches the app locally.  Override via
+            # FISHSEUS_BIND_HOST or the web.bind_host config key.
+            web_conf = _web.load_config().get("web", {})
+            host = _web.security.resolve_settings(web_conf)["bind_host"]
+            for line in _web.security.startup_report(web_conf):
+                _log("web", line.replace("[web] ", ""))
+
             thread = threading.Thread(
                 target=_web.app.run,
                 kwargs={
-                    "host":        "0.0.0.0",
+                    "host":        host,
                     "port":        self.web_port,
                     "debug":       False,
                     "threaded":    True,
@@ -553,7 +571,7 @@ class Fishseus:
                 daemon=True,
             )
             thread.start()
-            _log("web", f"Control panel at http://0.0.0.0:{self.web_port}/")
+            _log("web", f"Control panel at http://{host}:{self.web_port}/")
         except Exception as exc:
             _log("web", f"Web server failed to start: {exc}")
 
