@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.resolve()
@@ -13,6 +13,16 @@ class ServiceError(RuntimeError):
 class ServiceConfig(ABC):
     """Abstract base class for service configuration."""
     module_name: str = ""
+
+    def __post_init__(self) -> None:
+        # Path-typed fields often arrive as strings — e.g. a JSON config splatted
+        # in as SomeConfig(**cfg). Dataclasses don't coerce to the annotated type,
+        # so normalise any Path field here (frozen -> object.__setattr__).
+        for f in fields(self):
+            if f.type is Path or f.type == "Path":
+                value = getattr(self, f.name)
+                if value is not None and not isinstance(value, Path):
+                    object.__setattr__(self, f.name, Path(value))
 
     @abstractmethod
     def validate(self) -> bool:
