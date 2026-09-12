@@ -137,56 +137,22 @@ class Fishseus:
 
         # Audio
         _log("init", "Starting audio service…")
-        self.audio = AudioService(AudioConfig(
-            device              = audio_cfg.get("device", "plughw:3,0"),
-            sample_rate         = int(audio_cfg.get("sample_rate", 16000)),
-            channels            = int(audio_cfg.get("channels", 1)),
-            speech_threshold    = float(audio_cfg.get("speech_threshold", 0.003)),
-            silence_threshold   = float(audio_cfg.get("silence_threshold", 0.0008)),
-            silence_timeout_s   = float(audio_cfg.get("silence_timeout_s", 1.0)),
-            max_record_seconds  = float(audio_cfg.get("max_record_seconds", 12.0)),
-            pre_roll_seconds    = float(audio_cfg.get("pre_roll_seconds", 0.4)),
-        ))
+        self.audio = AudioService(AudioConfig(**audio_cfg))
         self.audio.initialize()
 
         # STT
         _log("init", "Starting STT service…")
-        self.stt = SttService(SttConfig(
-            whisper_binary = Path(str((config_dir / stt_cfg.get(
-                "whisper_binary", "../stt/whisper.cpp/build/bin/whisper-cli"
-            )).resolve())),
-            model_path = Path(str((config_dir / stt_cfg.get(
-                "model_path", "../stt/whisper.cpp/models/ggml-base.en.bin"
-            )).resolve())),
-            threads         = int(stt_cfg.get("threads", 4)),
-            wake_words      = stt_cfg.get("wake_words", ["fish", "fishseus", "hey fish"]),
-            strip_wake_word = bool(stt_cfg.get("strip_wake_word", True)),
-        ))
+        self.stt = SttService(SttConfig(**stt_cfg))
         self.stt.initialize()
 
         # LLM
         _log("init", "Starting LLM service…")
-        self.llm = LlmService(LlmConfig(
-            endpoint_url      = llm_cfg.get("endpoint_url", "http://ollama.angelfish-gamma.ts.net/v1/chat/completions"),
-            model             = llm_cfg.get("model", "qwen2.5:3b"),
-            timeout_s         = 45.0,
-            retries           = 1,
-            temperature       = float(llm_cfg.get("temperature", 0.7)),
-            max_tokens        = int(llm_cfg.get("max_tokens", 512)),
-            disable_reasoning = bool(llm_cfg.get("disable_reasoning", True)),
-        ))
+        self.llm = LlmService(LlmConfig(**llm_cfg))
         self.llm.initialize()
 
         # TTS  — persistent=True keeps piper loaded in memory
         _log("init", "Starting TTS service (persistent piper daemon)…")
-        self.tts = TtsService(TtsConfig(
-            piper_binary  = Path(str((config_dir / tts_cfg.get("piper_binary", "../tts/.venv/bin/piper")).resolve())),
-            voices_dir    = Path((config_dir / tts_cfg.get("voices_dir", "../tts/voices")).resolve()),
-            default_voice = tts_cfg.get("default_voice", "en_US-arctic-medium"),
-            audio_device  = tts_cfg.get("audio_device", "plughw:0,0"),
-            output_dir    = tts_out,
-            persistent    = True,
-        ))
+        self.tts = TtsService(TtsConfig(**tts_cfg, output_dir=str(tts_out), persistent=True))
         self.tts.initialize()
         _log("init", f"TTS voices available: {self.tts.available_voices()}")
 
@@ -199,15 +165,7 @@ class Fishseus:
         if vision_cfg.get("cameras"):
             _log("init", "Starting vision service…")
             try:
-                self.vision = VisionService(VisionConfig(
-                    endpoint_url   = vision_cfg.get("endpoint_url", llm_cfg.get("endpoint_url", "")),
-                    model          = vision_cfg.get("model", "qwen2.5vl:3b"),
-                    timeout_s      = float(vision_cfg.get("timeout_s", 60.0)),
-                    max_tokens     = int(vision_cfg.get("max_tokens", 300)),
-                    capture_dir    = PROJECT_ROOT / "tmp" / "vision",
-                    cameras        = vision_cfg.get("cameras", {}),
-                    default_camera = vision_cfg.get("default_camera", ""),
-                ))
+                self.vision = VisionService(VisionConfig(**vision_cfg))
                 self.vision.initialize()
                 _log("init", f"Vision cameras: {self.vision.available_cameras()}")
             except Exception as exc:
@@ -220,10 +178,7 @@ class Fishseus:
         if sensors_cfg.get("enabled", False) and sensors_cfg.get("sensors"):
             _log("init", "Starting sensor service…")
             try:
-                self.sensors = SensorService(SensorConfig(
-                    poll_interval_s = float(sensors_cfg.get("poll_interval_s", 0.05)),
-                    sensors         = sensors_cfg.get("sensors", []),
-                ))
+                self.sensors = SensorService(SensorConfig(**sensors_cfg))
                 self.sensors.set_callback(self._on_sensor_event)
                 self.sensors.initialize()
             except Exception as exc:
@@ -493,28 +448,33 @@ class Fishseus:
     # -------------------------------------------------------------------
 
     def _build_motion_service(self, motion_cfg: dict) -> MotionService:
+        # Motors live on the HAT's ATtiny1614 now, addressed by channel
+        # (0..3 = M1..M4), not by Pi GPIO pins.
+        default_channels = {"mouth": 0, "tail": 1, "body": 2}
         motors_raw = motion_cfg.get("motors", {})
         motors = {}
-        for name, m in motors_raw.items():
+        for index, (name, m) in enumerate(motors_raw.items()):
             motors[name] = MotorConfig(
-                in1                = int(m.get("in1", 0)),
-                in2                = int(m.get("in2", 0)),
-                en                 = int(m.get("en", 0)),
+                channel            = int(m.get("channel", default_channels.get(name, index))),
                 forward_speed      = float(m.get("forward_speed", 70)),
                 reverse_speed      = float(m.get("reverse_speed", 55)),
                 neutral_return_time= float(m.get("neutral_return_time", 0.08)),
+                invert             = bool(m.get("invert", False)),
             )
 
         if not motors:
             motors = {
-                "mouth": MotorConfig(17, 27, 22, 82, 55, 0.04),
-                "tail":  MotorConfig(23, 24, 25, 72, 48, 0.03),
-                "body":  MotorConfig(5,  6,  12, 68, 45, 0.03),
+                "mouth": MotorConfig(0, 82, 55, 0.04),
+                "tail":  MotorConfig(1, 72, 48, 0.03),
+                "body":  MotorConfig(2, 68, 45, 0.03),
             }
 
         return MotionService(MotionConfig(
             motors           = motors,
-            pwm_frequency    = int(motion_cfg.get("pwm_frequency", 1000)),
+            i2c_bus          = int(motion_cfg.get("i2c_bus", 1)),
+            i2c_address      = int(motion_cfg.get("i2c_address", 0x28)),
+            auto_enable      = bool(motion_cfg.get("auto_enable", True)),
+            pwm_frequency    = int(motion_cfg.get("pwm_frequency", 1500)),
             body_wiggle_time = float(motion_cfg.get("body_wiggle_time", 0.18)),
             tail_wiggle_time = float(motion_cfg.get("tail_wiggle_time", 0.14)),
             mouth_open_time  = float(motion_cfg.get("mouth_open_time", 0.09)),

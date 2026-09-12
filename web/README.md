@@ -15,7 +15,7 @@ The `web` module provides a Flask-based web server and a modernized, responsive,
 
 The web server needs `flask` (and `PyJWT[crypto]` for Cloudflare Access). On the
 Pi, install them into a virtualenv created with `--system-site-packages` so the
-hardware services (`RPi.GPIO`, `gpiozero`, `requests`) remain importable:
+hardware services (`smbus2`, `RPi.GPIO`, `gpiozero`, `requests`) remain importable:
 
 ```bash
 python -m venv web/.venv --system-site-packages

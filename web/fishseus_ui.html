@@ -492,9 +492,8 @@
                 <div class="motor-card" data-motor="mouth">
                     <h4>🫦 Mouth Motor</h4>
                     <div class="motor-fields">
-                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
-                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
-                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Channel</label><input type="number" data-key="channel" min="0" max="3"></div>
+                        <div class="motor-field"><label>Invert</label><input type="number" data-key="invert" min="0" max="1"></div>
                         <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
@@ -503,9 +502,8 @@
                 <div class="motor-card" data-motor="tail">
                     <h4>🐠 Tail Motor</h4>
                     <div class="motor-fields">
-                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
-                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
-                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Channel</label><input type="number" data-key="channel" min="0" max="3"></div>
+                        <div class="motor-field"><label>Invert</label><input type="number" data-key="invert" min="0" max="1"></div>
                         <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
@@ -514,9 +512,8 @@
                 <div class="motor-card" data-motor="body">
                     <h4>🐟 Body Motor</h4>
                     <div class="motor-fields">
-                        <div class="motor-field"><label>IN1</label><input type="number" data-key="in1" min="0"></div>
-                        <div class="motor-field"><label>IN2</label><input type="number" data-key="in2" min="0"></div>
-                        <div class="motor-field"><label>EN</label><input type="number" data-key="en" min="0"></div>
+                        <div class="motor-field"><label>Channel</label><input type="number" data-key="channel" min="0" max="3"></div>
+                        <div class="motor-field"><label>Invert</label><input type="number" data-key="invert" min="0" max="1"></div>
                         <div class="motor-field"><label>Fwd Spd</label><input type="number" data-key="forward_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Rev Spd</label><input type="number" data-key="reverse_speed" min="0" max="100"></div>
                         <div class="motor-field"><label>Return</label><input type="number" data-key="neutral_return_time" step="0.01"></div>
@@ -530,7 +527,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="motion_pwm_frequency">PWM Frequency (Hz)</label>
-                        <input type="number" id="motion_pwm_frequency" min="100">
+                        <input type="number" id="motion_pwm_frequency" min="24" max="1526">
                     </div>
                     <div class="form-group">
                         <label for="motion_body_wiggle_time">Body Wiggle Time (s)</label>
@@ -944,7 +941,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const mcfg = motors[motorName] || {};
                 card.querySelectorAll('.motor-field input').forEach(inp => {
                     const key = inp.dataset.key;
-                    if (key && mcfg[key] !== undefined) inp.value = mcfg[key];
+                    if (!key || mcfg[key] === undefined) return;
+                    const v = mcfg[key];
+                    inp.value = (typeof v === 'boolean') ? (v ? 1 : 0) : v;
                 });
             });
 
@@ -1299,7 +1298,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const m = {};
             card.querySelectorAll('.motor-field input').forEach(inp => {
                 const key = inp.dataset.key;
-                m[key] = key === 'neutral_return_time' ? parseFloat(inp.value) : parseInt(inp.value, 10);
+                if (key === 'neutral_return_time') m[key] = parseFloat(inp.value);
+                else if (key === 'invert') m[key] = (parseInt(inp.value, 10) || 0) !== 0;
+                else m[key] = parseInt(inp.value, 10);
             });
             motors[name] = m;
         });

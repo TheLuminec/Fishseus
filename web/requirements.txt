@@ -1,7 +1,7 @@
 # Web control panel dependencies.
 #
 # On the Raspberry Pi, install into a venv that can also see the system
-# hardware packages (RPi.GPIO, gpiozero, requests), then run the app with that
+# hardware packages (smbus2, RPi.GPIO, gpiozero, requests), then run the app with that
 # venv's interpreter:
 #   python -m venv web/.venv --system-site-packages
 #   web/.venv/bin/pip install -r web/requirements.txt

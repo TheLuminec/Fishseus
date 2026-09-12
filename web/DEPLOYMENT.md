@@ -24,7 +24,7 @@ guide gets it online safely behind a Cloudflare Tunnel + Cloudflare Access.
 
 The Pi's Python is externally managed (PEP 668), so use a virtualenv for the web
 dependencies. **Create it with `--system-site-packages`** — the web server
-imports the hardware services (`RPi.GPIO`, `gpiozero`, `requests`), which are
+imports the hardware services (`smbus2`, `RPi.GPIO`, `gpiozero`, `requests`), which are
 installed as system packages; without that flag those services would import as
 "unavailable".
 

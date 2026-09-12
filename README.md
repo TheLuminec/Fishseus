@@ -8,7 +8,7 @@ Fishseus is a modular voice-assistant stack for a motorized Billy Bass-style fis
 - [`tts/README.md`](tts/README.md): Piper text-to-speech generation and playback APIs.
 - [`llm/README.md`](llm/README.md): OpenAI-compatible chat completion client APIs.
 - [`assistant/README.md`](assistant/README.md): assistant orchestration, memory, and tool APIs.
-- [`motion/README.md`](motion/README.md): GPIO motor control and animation APIs.
+- [`motion/README.md`](motion/README.md): I2C motor control (ATtiny1614 HAT) and animation APIs.
 - [`orchestrator/README.md`](orchestrator/README.md): end-to-end demo workflows.
 - [`config/README.md`](config/README.md): prompt/config assets and usage.
 

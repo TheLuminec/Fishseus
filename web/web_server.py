@@ -90,7 +90,7 @@ try:
 except Exception:
     AssistantConfig = AssistantService = ToolCall = None  # type: ignore[assignment, misc]
 
-# Motion (requires RPi.GPIO — will fail on non-Pi machines)
+# Motion (requires smbus2 + the HAT's I2C bus — will fail on non-Pi machines)
 try:
     from motion.motion_service import MotionConfig, MotionService, MotorConfig  # type: ignore[import-untyped]
     _available["motion"] = True
@@ -152,7 +152,10 @@ DEFAULT_CONFIG: dict[str, object] = {
         "output_dir": "../tmp/tts",
     },
     "motion": {
-        "pwm_frequency": 1000,
+        "i2c_bus": 1,
+        "i2c_address": 0x28,
+        "auto_enable": True,
+        "pwm_frequency": 1500,
         "body_wiggle_time": 0.18,
         "tail_wiggle_time": 0.14,
         "mouth_open_time": 0.09,
@@ -160,17 +163,17 @@ DEFAULT_CONFIG: dict[str, object] = {
         "envelope_window_s": 0.18,
         "motors": {
             "mouth": {
-                "in1": 17, "in2": 27, "en": 22,
+                "channel": 0, "invert": False,
                 "forward_speed": 82, "reverse_speed": 55,
                 "neutral_return_time": 0.04,
             },
             "tail": {
-                "in1": 23, "in2": 24, "en": 25,
+                "channel": 1, "invert": False,
                 "forward_speed": 72, "reverse_speed": 48,
                 "neutral_return_time": 0.03,
             },
             "body": {
-                "in1": 5, "in2": 6, "en": 12,
+                "channel": 2, "invert": False,
                 "forward_speed": 68, "reverse_speed": 45,
                 "neutral_return_time": 0.03,
             },
@@ -285,17 +288,20 @@ _amp_lock = threading.Lock()
 
 
 def _build_motor_configs(motion_conf: dict) -> "dict[str, MotorConfig]":
-    """Build MotorConfig dataclass instances from config dict."""
+    """Build MotorConfig dataclass instances from config dict.
+
+    Motors are addressed by channel on the HAT's ATtiny1614 (0..3 = M1..M4).
+    """
+    default_channels = {"mouth": 0, "tail": 1, "body": 2}
     motors_raw = motion_conf.get("motors", {})
     motors = {}
-    for name, m in motors_raw.items():
+    for index, (name, m) in enumerate(motors_raw.items()):
         motors[name] = MotorConfig(
-            in1=int(m.get("in1", 0)),
-            in2=int(m.get("in2", 0)),
-            en=int(m.get("en", 0)),
+            channel=int(m.get("channel", default_channels.get(name, index))),
             forward_speed=float(m.get("forward_speed", 70)),
             reverse_speed=float(m.get("reverse_speed", 55)),
             neutral_return_time=float(m.get("neutral_return_time", 0.08)),
+            invert=bool(m.get("invert", False)),
         )
     return motors
 
@@ -334,7 +340,10 @@ def init_services() -> None:
             mc = config.get("motion", {})
             motors = _build_motor_configs(mc)
             cfg_kwargs = dict(
-                pwm_frequency=int(mc.get("pwm_frequency", 1000)),
+                i2c_bus=int(mc.get("i2c_bus", 1)),
+                i2c_address=int(mc.get("i2c_address", 0x28)),
+                auto_enable=bool(mc.get("auto_enable", True)),
+                pwm_frequency=int(mc.get("pwm_frequency", 1500)),
                 body_wiggle_time=float(mc.get("body_wiggle_time", 0.18)),
                 tail_wiggle_time=float(mc.get("tail_wiggle_time", 0.14)),
                 mouth_open_time=float(mc.get("mouth_open_time", 0.09)),

@@ -35,7 +35,10 @@
     "output_dir": "../tmp/tts"
   },
   "motion": {
-    "pwm_frequency": 1000,
+    "i2c_bus": 1,
+    "i2c_address": 40,
+    "auto_enable": true,
+    "pwm_frequency": 1500,
     "body_wiggle_time": 0.17,
     "tail_wiggle_time": 0.18,
     "mouth_open_time": 0.12,
@@ -43,25 +46,22 @@
     "envelope_window_s": 0.18,
     "motors": {
       "mouth": {
-        "in1": 17,
-        "in2": 27,
-        "en": 22,
+        "channel": 0,
+        "invert": false,
         "forward_speed": 82,
         "reverse_speed": 20,
         "neutral_return_time": 0.04
       },
       "tail": {
-        "in1": 23,
-        "in2": 24,
-        "en": 25,
+        "channel": 1,
+        "invert": false,
         "forward_speed": 0,
         "reverse_speed": 0,
         "neutral_return_time": 0.02
       },
       "body": {
-        "in1": 5,
-        "in2": 6,
-        "en": 12,
+        "channel": 2,
+        "invert": false,
         "forward_speed": 82,
         "reverse_speed": 25,
         "neutral_return_time": 0.02
