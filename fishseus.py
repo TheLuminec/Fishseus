@@ -152,7 +152,7 @@ class Fishseus:
 
         # TTS  — persistent=True keeps piper loaded in memory
         _log("init", "Starting TTS service (persistent piper daemon)…")
-        self.tts = TtsService(TtsConfig(**tts_cfg, output_dir=str(tts_out), persistent=True))
+        self.tts = TtsService(TtsConfig(**tts_cfg, persistent=True))
         self.tts.initialize()
         _log("init", f"TTS voices available: {self.tts.available_voices()}")
 
