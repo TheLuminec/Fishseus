@@ -716,9 +716,35 @@ def api_section(section: str):
         return jsonify({"error": "Cannot update this section"}), 400
 
     config_section.update(data)
+    try:
+        new_config = _build_live_config(section, config_section)
+    except Exception as exc:
+        return jsonify({"error": f"Not saved: {exc}"}), 400
     config[section] = config_section
     save_config(config)
+    # Swap the running service's config so the change applies without a restart.
+    service = {"spotify": _spotify, "bluetooth": _bluetooth, "access_point": _access_point}.get(section)
+    if service is not None and new_config is not None:
+        service.config = new_config
     return jsonify({"status": "saved"})
+
+
+def _build_live_config(section: str, values: dict):
+    """Validated config object for services that read their config at call time
+    (so it can be swapped in live), else None. Raises on invalid values, so a bad
+    setting is rejected rather than saved and left to break the next start-up.
+    "enabled" is an orchestrator key and still needs a Fishseus restart."""
+    if section == "spotify":
+        from spotify.spotify_service import SpotifyConfig as cls
+    elif section == "bluetooth":
+        from bluetooth.bluetooth_service import BluetoothConfig as cls
+    elif section == "access_point":
+        from access_point.access_point_service import AccessPointConfig as cls
+    else:
+        return None
+    new_config = cls(**{k: v for k, v in values.items() if k != "enabled"})
+    new_config.validate()
+    return new_config
 
 # --- Hardware device discovery ---
 
@@ -819,7 +845,13 @@ def api_devices():
     # Do the (slow) discovery outside the lock so concurrent callers don't block.
     result = {
         "capture": _list_alsa_devices("arecord"),
-        "playback": _list_alsa_devices("aplay"),
+        # Named PCMs (default, fishout, ...) first: shareable, so they can mix
+        # with raspotify, unlike raw plughw: cards.
+        "playback": [
+            {"id": name, "label": f"{name} (shared ALSA device)"}
+            # fishmix is the raw dmix behind fishout; it can't convert formats.
+            for name in _list_alsa_pcms() if ":" not in name and name != "fishmix"
+        ] + _list_alsa_devices("aplay"),
         "cameras": _list_cameras(),
     }
     with _devices_lock:
@@ -1025,6 +1057,173 @@ def api_sensors_status():
         return jsonify({"available": True, "sensors": _sensors.sensor_report()})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+# --- Spotify (orchestrator mode only) ---
+
+def _unavailable(name: str):
+    return jsonify({"available": False, "error": f"{name} is not running — enable it and restart Fishseus"}), 503
+
+
+@app.route("/api/spotify/state")
+def api_spotify_state():
+    """Now-playing info plus the account's Connect devices."""
+    if _spotify is None:
+        return jsonify({"available": False})
+    try:
+        return jsonify({
+            "available": True,
+            "playback": _spotify.playback_state(),
+            "devices": _spotify.devices(),
+            "status": _spotify.status(),
+        })
+    except Exception as exc:
+        return jsonify({"available": True, "error": str(exc)}), 502
+
+
+@app.route("/api/spotify/<action>", methods=["POST"])
+def api_spotify_action(action: str):
+    """Transport control: play, pause, resume, next, previous, volume, shuffle, transfer."""
+    if _spotify is None:
+        return _unavailable("Spotify")
+    data = request.get_json(silent=True) or {}
+    handlers = {
+        "play":     lambda: _spotify.play(str(data.get("query", "")), str(data.get("kind", "track"))),
+        "pause":    _spotify.pause,
+        "resume":   _spotify.resume,
+        "next":     _spotify.next_track,
+        "previous": _spotify.previous_track,
+        "volume":   lambda: _spotify.set_volume(int(data.get("percent", 50))),
+        "shuffle":  lambda: _spotify.set_shuffle(bool(data.get("state"))),
+        "transfer": lambda: _spotify.transfer(str(data.get("device_id", ""))),
+    }
+    handler = handlers.get(action)
+    if handler is None:
+        return jsonify({"error": f"Unknown Spotify action '{action}'"}), 404
+    try:
+        return jsonify({"status": handler()})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+# --- Bluetooth (orchestrator mode only) ---
+
+@app.route("/api/bluetooth/devices")
+def api_bluetooth_devices():
+    """Adapter status plus every device BlueZ knows about."""
+    if _bluetooth is None:
+        return jsonify({"available": False, "devices": []})
+    try:
+        return jsonify({
+            "available": True,
+            "status": _bluetooth.status(),
+            "devices": _bluetooth.list_devices(),
+        })
+    except Exception as exc:
+        return jsonify({"available": True, "error": str(exc), "devices": []}), 502
+
+
+@app.route("/api/bluetooth/<action>", methods=["POST"])
+def api_bluetooth_action(action: str):
+    """scan / pair / connect / disconnect / forget. Body: {"target": mac-or-name}."""
+    if _bluetooth is None:
+        return _unavailable("Bluetooth")
+    target = str((request.get_json(silent=True) or {}).get("target", "")).strip()
+    try:
+        if action == "scan":
+            devices = _bluetooth.scan()
+            return jsonify({"status": f"Found {len(devices)} device(s)", "devices": devices})
+        if action == "pair":
+            return jsonify({"status": f"Paired {_bluetooth.pair(target)['name']}"})
+        if action == "connect":
+            return jsonify({"status": f"Connected {_bluetooth.connect(target)['name']}"})
+        if action == "disconnect":
+            names = _bluetooth.disconnect(target)
+            return jsonify({"status": f"Disconnected {', '.join(names)}" if names else "Nothing was connected"})
+        if action == "forget":
+            return jsonify({"status": f"Forgot {_bluetooth.forget(target)}"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"error": f"Unknown Bluetooth action '{action}'"}), 404
+
+
+# --- Wi-Fi access point (orchestrator mode only) ---
+
+@app.route("/api/access_point/state")
+def api_access_point_state():
+    if _access_point is None:
+        return jsonify({"available": False})
+    try:
+        return jsonify({
+            "available": True,
+            "status": _access_point.status(),
+            "clients": _access_point.clients(),
+        })
+    except Exception as exc:
+        return jsonify({"available": True, "error": str(exc)}), 502
+
+
+@app.route("/api/access_point/restart", methods=["POST"])
+def api_access_point_restart():
+    """Stop and restart the AP so saved settings take effect."""
+    if _access_point is None:
+        return _unavailable("The access point")
+    try:
+        _access_point.reset()
+        return jsonify({"status": "Access point restarted"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+# --- Audio output (speaker / mixing) ---
+
+def _list_alsa_pcms() -> list[str]:
+    """Named PCMs from `aplay -L` (e.g. default, fishout) — includes asound.conf entries."""
+    try:
+        proc = subprocess.run(["aplay", "-L"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return []
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines()
+            if line and not line[0].isspace() and line.strip() != "null"]
+
+
+@app.route("/api/audio/output")
+def api_audio_output():
+    """Current speaker routing: TTS device, mixer presence, ducking mode."""
+    config = load_config()
+    pcms = _list_alsa_pcms()
+    device = config.get("tts", {}).get("audio_device", "")
+    return jsonify({
+        "audio_device": device,
+        "pcms": pcms,
+        "mixer_installed": "fishout" in pcms,
+        # plughw:/hw: devices can't be shared, so they can't mix with raspotify.
+        "device_shared": not device.startswith(("hw:", "plughw:")),
+        "duck_mode": config.get("spotify", {}).get("duck_mode", "volume"),
+        "duck_percent": config.get("spotify", {}).get("duck_percent", 30),
+        "spotify_running": _spotify is not None,
+        "bluetooth_running": _bluetooth is not None,
+    })
+
+
+@app.route("/api/audio/test", methods=["POST"])
+def api_audio_test():
+    """Speak a test line through the live TTS path, ducking any music like the fish does."""
+    if _tts is None:
+        return jsonify({"error": "TTS service unavailable"}), 503
+    text = str((request.get_json(silent=True) or {}).get("text", "")).strip() or "Testing, one, two, three."
+    if _spotify is not None:
+        _spotify.duck()
+    try:
+        _tts.speak(text[:200])
+        return jsonify({"status": "Played test line"})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        if _spotify is not None:
+            _spotify.unduck()
 
 
 # --- Tool management ---

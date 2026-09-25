@@ -6,7 +6,8 @@ Thin Spotify playback-control service for Fishseus using spotipy (Web API).
 Responsibilities:
 - Search the Spotify catalogue and start a track / album / artist / playlist
 - Transport control: pause, resume, skip, previous, volume, now-playing
-- Duck the music volume while the fish speaks, then restore it
+- Get the music out of the way while the fish speaks (lower or pause it),
+  then restore it
 
 Non-responsibilities:
 - No audio output of its own: Spotify's Web API only *controls* a Spotify
@@ -28,7 +29,7 @@ Example:
 Orchestrator usage:
     sp = SpotifyService(SpotifyConfig(**config.get("spotify", {})))
     sp.initialize()          # raises SpotifyServiceError if not yet authorised
-    sp.duck() / sp.unduck()  # around fish speech
+    sp.duck() / sp.unduck()  # around fish speech (lower/restore or pause/resume)
     sp.shutdown()
 """
 
@@ -56,6 +57,7 @@ class SpotifyServiceError(ServiceError):
 
 SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
 KINDS = ("track", "album", "artist", "playlist")
+DUCK_MODES = ("volume", "pause", "off")
 
 
 @dataclass(frozen=True)
@@ -74,12 +76,25 @@ class SpotifyConfig(ServiceConfig):
     # Spotify Connect device to play on (case-insensitive substring of its name,
     # e.g. the raspotify DEVICE_NAME). Empty = whichever device is active.
     device_name: str = "Fishseus"
-    market: str = "from_token"
-    # Volume (percent of the current level) while the fish talks; 100 disables.
+    # ISO country code (e.g. "US"). Empty = omit it, and Spotify uses the
+    # account's own country. Avoid "from_token": it needs the
+    # user-read-private scope, which we don't request.
+    market: str = ""
+    # What happens to the music while the fish talks:
+    #   "volume" - drop to duck_percent of the current level. Needs an output
+    #              both librespot and aplay can open at once (the shared dmix
+    #              "fishout" device, see spotify/README.md), otherwise aplay
+    #              fails with "Device or resource busy".
+    #   "pause"  - pause, then resume. Works with any audio setup: librespot
+    #              releases the ALSA device when paused, so aplay can open it.
+    #   "off"    - leave the music alone.
+    duck_mode: str = "volume"
     duck_percent: int = 30
     request_timeout_s: float = 10.0
 
     def validate(self) -> bool:
+        if self.duck_mode not in DUCK_MODES:
+            raise SpotifyServiceError(f"duck_mode must be one of {DUCK_MODES}: {self.duck_mode!r}")
         if not 0 <= self.duck_percent <= 100:
             raise SpotifyServiceError(f"duck_percent must be 0-100: {self.duck_percent}")
         if self.request_timeout_s <= 0:
@@ -120,7 +135,8 @@ class SpotifyService(Service):
         # Web and main threads both drive playback; keep requests (and the
         # duck/unduck volume bookkeeping) ordered.
         self._lock = threading.RLock()
-        self._ducked_from: Optional[int] = None
+        self._ducked_from: Optional[int] = None   # "volume" mode: level to restore
+        self._paused_for_speech = False           # "pause" mode: resume afterwards
         self._last_error: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -147,6 +163,7 @@ class SpotifyService(Service):
         # Leave the music playing: the fish restarting shouldn't stop the party.
         self._sp = None
         self._ducked_from = None
+        self._paused_for_speech = False
         self._initialized = False
 
     def status(self) -> dict:
@@ -154,7 +171,7 @@ class SpotifyService(Service):
             "enabled": self.enabled,
             "service": "ok" if self._initialized else "uninitialized",
             "device_name": self.config.device_name,
-            "ducked": self._ducked_from is not None,
+            "ducked": self._ducked_from is not None or self._paused_for_speech,
             "last_error": self._last_error,
         }
 
@@ -177,7 +194,7 @@ class SpotifyService(Service):
 
         with self._lock:
             sp = self._client()
-            results = self._call(sp.search, q=query, type=kind, limit=1, market=self.config.market)
+            results = self._call(sp.search, q=query, type=kind, limit=1, market=self.config.market or None)
             items = [i for i in (results.get(f"{kind}s", {}).get("items") or []) if i]
             if not items:
                 return f"Couldn't find any {kind} matching '{query}'"
@@ -187,12 +204,16 @@ class SpotifyService(Service):
                 self._call(sp.start_playback, device_id=device_id, uris=[item["uri"]])
             else:
                 self._call(sp.start_playback, device_id=device_id, context_uri=item["uri"])
-            self._ducked_from = None  # a fresh play starts at the device's own volume
+            # A fresh play starts at the device's own volume, and must not be
+            # "resumed" again by a pending unduck().
+            self._ducked_from = None
+            self._paused_for_speech = False
             return f"Playing {describe(item, kind)}"
 
     def pause(self) -> str:
         with self._lock:
             self._call(self._client().pause_playback, device_id=self._device_id())
+            self._paused_for_speech = False  # an explicit pause should stick
         return "Music paused"
 
     def resume(self) -> str:
@@ -219,11 +240,58 @@ class SpotifyService(Service):
 
     def now_playing(self) -> str:
         with self._lock:
-            current = self._call(self._client().current_playback, market=self.config.market)
+            current = self._call(self._client().current_playback, market=self.config.market or None)
         if not current or not current.get("item"):
             return "Nothing is playing"
         state = "Playing" if current.get("is_playing") else "Paused on"
         return f"{state} {describe(current['item'], 'track')}"
+
+    def playback_state(self) -> dict:
+        """Structured now-playing info for the web UI ({} when nothing is loaded)."""
+        with self._lock:
+            current = self._call(self._client().current_playback, market=self.config.market or None)
+        if not current:
+            return {}
+        item = current.get("item") or {}
+        device = current.get("device") or {}
+        images = (item.get("album") or {}).get("images") or []
+        return {
+            "is_playing": bool(current.get("is_playing")),
+            "title": item.get("name", ""),
+            "artists": ", ".join(a.get("name", "") for a in item.get("artists") or [] if a),
+            "album": (item.get("album") or {}).get("name", ""),
+            # Spotify lists 640 / 300 / 64 px; the middle one suits the page.
+            "image": images[min(1, len(images) - 1)]["url"] if images else "",
+            "progress_ms": current.get("progress_ms") or 0,
+            "duration_ms": item.get("duration_ms") or 0,
+            "device": device.get("name", ""),
+            "volume": device.get("volume_percent"),
+            "shuffle": bool(current.get("shuffle_state")),
+            "ducked": self._ducked_from is not None or self._paused_for_speech,
+        }
+
+    def devices(self) -> list[dict]:
+        """Spotify Connect devices visible to the account."""
+        with self._lock:
+            found = self._call(self._client().devices).get("devices") or []
+        return [{
+            "id": d.get("id"),
+            "name": d.get("name", ""),
+            "type": d.get("type", ""),
+            "is_active": bool(d.get("is_active")),
+            "volume": d.get("volume_percent"),
+        } for d in found]
+
+    def transfer(self, device_id: str, play: bool = True) -> str:
+        """Move playback to another Connect device."""
+        with self._lock:
+            self._call(self._client().transfer_playback, device_id, force_play=play)
+        return "Playback moved"
+
+    def set_shuffle(self, state: bool) -> str:
+        with self._lock:
+            self._call(self._client().shuffle, bool(state), device_id=self._device_id())
+        return f"Shuffle {'on' if state else 'off'}"
 
     def is_playing(self) -> bool:
         """Cheap-ish check used by the orchestrator; never raises."""
@@ -237,17 +305,24 @@ class SpotifyService(Service):
             return False
 
     def duck(self) -> None:
-        """Lower the music while the fish speaks. Never raises; no-op when idle."""
-        if not self._initialized or self.config.duck_percent >= 100:
+        """Get the music out of the way while the fish speaks (see duck_mode).
+        Never raises; no-op when nothing is playing."""
+        if not self._initialized or self.config.duck_mode == "off":
+            return
+        if self.config.duck_mode == "volume" and self.config.duck_percent >= 100:
             return
         try:
             with self._lock:
-                if self._ducked_from is not None:
+                if self._ducked_from is not None or self._paused_for_speech:
                     return
                 current = self._call(self._client().current_playback)
                 if not current or not current.get("is_playing"):
                     return
                 device = current.get("device") or {}
+                if self.config.duck_mode == "pause":
+                    self._call(self._client().pause_playback, device_id=device.get("id"))
+                    self._paused_for_speech = True
+                    return
                 volume = device.get("volume_percent")
                 if volume is None or not device.get("supports_volume", True):
                     return
@@ -259,13 +334,17 @@ class SpotifyService(Service):
             print(f"[spotify] duck failed: {exc}", flush=True)
 
     def unduck(self) -> None:
-        """Restore the volume saved by duck(). Never raises."""
+        """Undo duck(): resume the music or restore its volume. Never raises."""
         with self._lock:
             volume, self._ducked_from = self._ducked_from, None
-            if volume is None or not self._initialized:
+            paused, self._paused_for_speech = self._paused_for_speech, False
+            if not self._initialized:
                 return
             try:
-                self._call(self._client().volume, volume)
+                if paused:
+                    self._call(self._client().start_playback)
+                elif volume is not None:
+                    self._call(self._client().volume, volume)
             except SpotifyServiceError as exc:
                 print(f"[spotify] unduck failed: {exc}", flush=True)
 

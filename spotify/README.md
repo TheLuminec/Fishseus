@@ -3,10 +3,10 @@
 Thin Spotify playback-control service for Fishseus using
 [spotipy](https://spotipy.readthedocs.io/). Lets you ask the fish to play a song,
 artist, album, or playlist, and to pause, skip, or change the volume. The music
-is turned down automatically while the fish talks.
+is turned down while the fish talks (or paused, see `duck_mode`).
 
 **Responsibilities:** catalogue search, starting playback, transport control,
-volume, now-playing, and ducking around fish speech.
+volume, now-playing, and getting the music out of the way while the fish speaks.
 
 **Non-responsibilities:** no audio output of its own. The Spotify Web API only
 *controls* a Spotify Connect device; on the Pi that device is
@@ -26,8 +26,9 @@ Requires **Spotify Premium**; the playback endpoints reject free accounts.
 | `redirect_uri`      | `http://127.0.0.1:8888/callback`    | Must match the developer app's Redirect URI exactly.      |
 | `token_cache_path`  | `<root>/data/spotify_token.json`    | Cached refresh token (gitignored).                        |
 | `device_name`       | `"Fishseus"`                        | Connect device to play on (substring match). Empty = active device. |
-| `market`            | `"from_token"`                      | Search market.                                            |
-| `duck_percent`      | `30`                                | Music volume (% of current) while the fish speaks; `100` disables. |
+| `market`            | `""`                                | Country code for search; empty = the account's country. (`"from_token"` needs the `user-read-private` scope, which isn't requested.) |
+| `duck_mode`         | `"volume"`                          | While the fish speaks: `volume` (lower to `duck_percent`, needs the shared mixer below), `pause` then resume, or `off`. |
+| `duck_percent`      | `30`                                | `volume` mode: music level (% of current) while the fish speaks. |
 | `request_timeout_s` | `10.0`                              | HTTP timeout per Web API call.                            |
 
 Credentials are resolved in order: config field → `config/secrets.json`
@@ -52,8 +53,8 @@ because that file is committed and served by the web UI.
 - `set_volume(percent)` – 0–100.
 - `now_playing()` – `"Playing X by Y"` / `"Paused on …"` / `"Nothing is playing"`.
 - `is_playing()` – never raises.
-- `duck()` / `unduck()` – lower / restore the volume; never raise. The
-  orchestrator calls these around every spoken reply.
+- `duck()` / `unduck()` – lower / restore (or pause / resume) the music per
+  `duck_mode`; never raise. The orchestrator calls these around every spoken reply.
 
 ## Assistant tools
 
@@ -80,3 +81,36 @@ because that file is committed and served by the web UI.
   then set `LIBRESPOT_NAME="Fishseus"` in `/etc/raspotify/conf` so it matches
   `device_name`. Play something to it once from the Spotify app so it registers
   with your account.
+
+## Shared audio output (required for the default `volume` mode)
+
+raspotify (librespot's ALSA backend) and the fish's `aplay` both play to the same
+sound card, and a raw ALSA device (`hw:` / `plughw:`) only serves one program at
+a time — the second gets `Device or resource busy`. A shared **dmix** device
+mixes them in software, so the fish can talk over quieter music.
+
+`/etc/asound.conf` (replace `hw:0,0` with your card — see `aplay -l`):
+
+```
+pcm.fishmix {
+    type dmix
+    ipc_key 5978
+    ipc_key_add_uid false   # raspotify runs as a different user than Fishseus
+    ipc_perm 0666
+    slave {
+        pcm "hw:0,0"
+        rate 48000
+    }
+}
+
+pcm.fishout {
+    type plug
+    slave.pcm "fishmix"
+}
+```
+
+Then point both players at it: `tts.audio_device` is `"fishout"` in
+`fish_config.json`, and set `LIBRESPOT_DEVICE="fishout"` in
+`/etc/raspotify/conf`. Without this device the fish can't play audio at all —
+set up the mixer first, or use `"duck_mode": "pause"` with a `plughw:` device.
+`TtsService.play_wav()` still retries for up to 2 s on a busy device.

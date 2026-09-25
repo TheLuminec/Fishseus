@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fishseus — Control Panel</title>
     <meta name="description" content="Configuration and control panel for the Fishseus animatronic fish assistant.">
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/styles.css?v=2">  <!-- bump v when styles.css changes (served with a 1h cache) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>">
 </head>
 <body>
@@ -49,6 +49,9 @@
             <a class="nav-link" data-section="tts">
                 <span class="nav-icon">🔊</span> Text-to-Speech
             </a>
+            <a class="nav-link" data-section="output">
+                <span class="nav-icon">🎚️</span> Speaker &amp; Mixing
+            </a>
             <a class="nav-link" data-section="vision">
                 <span class="nav-icon">👁️</span> Vision
             </a>
@@ -59,6 +62,17 @@
             </a>
             <a class="nav-link" data-section="sensors">
                 <span class="nav-icon">📡</span> Sensors
+            </a>
+
+            <div class="nav-section-label">Music &amp; Network</div>
+            <a class="nav-link" data-section="spotify">
+                <span class="nav-icon">🎵</span> Spotify
+            </a>
+            <a class="nav-link" data-section="bluetooth">
+                <span class="nav-icon">🔵</span> Bluetooth
+            </a>
+            <a class="nav-link" data-section="access_point">
+                <span class="nav-icon">📶</span> Wi-Fi Access Point
             </a>
 
             <div class="nav-section-label">Identity</div>
@@ -782,6 +796,295 @@
             </div>
         </div>
 
+        <!-- Speaker & Mixing -->
+        <div class="content-section" id="sec-output">
+            <div class="section-header">
+                <h2>Speaker &amp; Mixing</h2>
+                <p>Where the fish's voice and the music come out, and what happens to the music while the fish talks.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔈</span> Routing Status</div>
+                <div class="kv-grid">
+                    <div class="kv-item"><span class="kv-label">Fish voice device</span><span class="kv-value" id="out-device">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Shared mixer (fishout)</span><span class="kv-value" id="out-mixer">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Music while talking</span><span class="kv-value" id="out-mode">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Spotify / Bluetooth</span><span class="kv-value" id="out-services">—</span></div>
+                </div>
+                <div class="notice" id="out-notice" style="display:none;"></div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-output">↻ Refresh</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔊</span> Playback Device</div>
+                <p class="hint">Use <code>fishout</code> so the fish and raspotify can play at the same time. Raw <code>plughw:</code> cards can only be used by one program at once. Restart Fishseus to apply.</p>
+                <div class="form-group">
+                    <label for="out_device_select">Detected Outputs</label>
+                    <div style="display:flex; gap:8px;">
+                        <select id="out_device_select" style="flex:1;">
+                            <option value="">— select a detected device —</option>
+                        </select>
+                        <button class="btn btn-secondary btn-sm" id="btn-refresh-outputs" title="Re-scan devices">↻</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="out_audio_device">Fish Voice Device (tts.audio_device)</label>
+                    <input type="text" id="out_audio_device" placeholder="fishout">
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-output-device">Save Playback Device</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🎚️</span> Music While the Fish Talks</div>
+                <p class="hint">Applies immediately.</p>
+                <div class="form-group">
+                    <label for="spotify_duck_mode">Mode</label>
+                    <select id="spotify_duck_mode" style="max-width:360px;">
+                        <option value="volume">Turn the music down (needs the shared mixer)</option>
+                        <option value="pause">Pause, then resume</option>
+                        <option value="off">Leave the music alone</option>
+                    </select>
+                </div>
+                <div class="threshold-slider-row" id="duck-percent-row">
+                    <label>Music level</label>
+                    <input type="range" class="threshold-slider" id="spotify_duck_percent" min="0" max="100" step="5" value="30">
+                    <span class="threshold-readout" id="readout-duck-percent">30%</span>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-ducking">Save Mixing Settings</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🧪</span> Test Output</div>
+                <p class="hint">Speaks through the running voice service, turning any music down or pausing it exactly as the fish does. Start some music first to test mixing.</p>
+                <div class="inline-form">
+                    <input type="text" id="out_test_text" placeholder="Testing, one, two, three.">
+                    <button class="btn btn-primary" id="btn-test-output">▶ Play Test Line</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Spotify -->
+        <div class="content-section" id="sec-spotify">
+            <div class="section-header">
+                <h2>Spotify</h2>
+                <p>What's playing, playback controls, and which Spotify Connect device the fish plays on.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🎵</span> Now Playing</div>
+                <div class="np-layout">
+                    <div class="np-art" id="sp-art-box">🐟</div>
+                    <div class="np-info">
+                        <div class="np-title" id="sp-title">Nothing playing</div>
+                        <div class="np-sub" id="sp-artist"></div>
+                        <div class="np-sub" id="sp-device"></div>
+                        <div class="np-progress"><div class="np-progress-fill" id="sp-progress"></div></div>
+                        <div class="np-times"><span id="sp-pos">0:00</span><span id="sp-dur">0:00</span></div>
+                    </div>
+                </div>
+                <div class="np-controls">
+                    <button class="btn btn-secondary btn-sm sp-btn" data-action="previous" title="Previous">⏮</button>
+                    <button class="btn btn-primary btn-sm sp-btn" id="sp-playpause" title="Play / pause">⏯</button>
+                    <button class="btn btn-secondary btn-sm sp-btn" data-action="next" title="Next">⏭</button>
+                    <button class="btn btn-secondary btn-sm sp-btn" id="sp-shuffle" title="Shuffle">🔀</button>
+                    <span style="font-size:12px; color:var(--text-muted);">Vol</span>
+                    <input type="range" class="threshold-slider" id="sp-volume" min="0" max="100" step="1" value="50">
+                    <span class="threshold-readout" id="sp-volume-readout">—</span>
+                </div>
+                <div class="notice" id="sp-notice" style="display:none;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔎</span> Play Something</div>
+                <div class="inline-form">
+                    <input type="text" id="sp-query" placeholder="Pump It Black Eyed Peas">
+                    <select id="sp-kind">
+                        <option value="track">Song</option>
+                        <option value="artist">Artist</option>
+                        <option value="album">Album</option>
+                        <option value="playlist">Playlist</option>
+                    </select>
+                    <button class="btn btn-primary sp-btn" id="sp-play-query">▶ Play</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📻</span> Connect Devices</div>
+                <div class="item-list" id="sp-devices"><p class="item-empty">Loading…</p></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">⚙️</span> Settings</div>
+                <p class="hint">The client ID and secret live in <code>config/secrets.json</code> and aren't shown here. Music-while-talking settings are on the Speaker &amp; Mixing page. Changes apply immediately; turning Spotify on or off needs a Fishseus restart.</p>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="spotify_enabled"> Enable Spotify</label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="spotify_device_name">Play On Device (name contains)</label>
+                        <input type="text" id="spotify_device_name" placeholder="Fishseus">
+                    </div>
+                    <div class="form-group">
+                        <label for="spotify_market">Market (country code, blank = account's)</label>
+                        <input type="text" id="spotify_market" placeholder="US" maxlength="2">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-spotify">Save Spotify Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bluetooth -->
+        <div class="content-section" id="sec-bluetooth">
+            <div class="section-header">
+                <h2>Bluetooth</h2>
+                <p>Pair, connect, and pick the default Bluetooth speaker.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔵</span> Adapter</div>
+                <div class="kv-grid">
+                    <div class="kv-item"><span class="kv-label">Service</span><span class="kv-value" id="bt-service">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Powered</span><span class="kv-value" id="bt-powered">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Connected</span><span class="kv-value" id="bt-connected">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Default speaker</span><span class="kv-value" id="bt-default">—</span></div>
+                </div>
+                <div class="notice" id="bt-notice" style="display:none;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔊</span> Devices</div>
+                <p class="hint">Put a new speaker in pairing mode, then Scan. Scanning takes about 10 seconds.</p>
+                <div class="btn-group" style="margin-top:0; margin-bottom:12px;">
+                    <button class="btn btn-primary btn-sm" id="btn-bt-scan">📡 Scan</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-bt-refresh">↻ Refresh</button>
+                </div>
+                <div class="item-list" id="bt-devices"><p class="item-empty">Loading…</p></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">⚙️</span> Settings</div>
+                <p class="hint">Changes apply immediately; turning Bluetooth on or off needs a Fishseus restart.</p>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="bluetooth_enabled"> Enable Bluetooth</label>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="bluetooth_auto_connect"> Reconnect the default speaker at start-up</label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="bluetooth_default_speaker">Default Speaker (name or MAC)</label>
+                        <input type="text" id="bluetooth_default_speaker" placeholder="JBL Flip 5">
+                    </div>
+                    <div class="form-group">
+                        <label for="bluetooth_scan_timeout_s">Scan Time (s)</label>
+                        <input type="number" id="bluetooth_scan_timeout_s" min="1" step="1">
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-bluetooth">Save Bluetooth Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wi-Fi Access Point -->
+        <div class="content-section" id="sec-access_point">
+            <div class="section-header">
+                <h2>Wi-Fi Access Point</h2>
+                <p>The isolated "Fishseus" network the turret and camera join. It has no internet access by design.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📶</span> Network</div>
+                <div class="kv-grid">
+                    <div class="kv-item"><span class="kv-label">State</span><span class="kv-value" id="ap-state">—</span></div>
+                    <div class="kv-item"><span class="kv-label">SSID</span><span class="kv-value" id="ap-ssid">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Interface</span><span class="kv-value" id="ap-iface">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Fish address</span><span class="kv-value" id="ap-address">—</span></div>
+                </div>
+                <div class="notice" id="ap-notice" style="display:none;"></div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" id="btn-ap-refresh">↻ Refresh</button>
+                    <button class="btn btn-danger btn-sm" id="btn-ap-restart">⟳ Restart Access Point</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">📱</span> Connected Devices</div>
+                <div class="item-list" id="ap-clients"><p class="item-empty">Loading…</p></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">⚙️</span> Settings</div>
+                <p class="hint">The passphrase lives in <code>config/secrets.json</code> and must match the ESP32 firmware. Save, then use Restart Access Point to apply. Turning the service on or off needs a Fishseus restart.</p>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="access_point_enabled"> Enable the access point</label>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label"><input type="checkbox" id="access_point_stop_on_shutdown"> Stop the network when Fishseus exits</label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="access_point_ssid">SSID</label>
+                        <input type="text" id="access_point_ssid" maxlength="32">
+                    </div>
+                    <div class="form-group">
+                        <label for="access_point_interface">Interface (blank = auto)</label>
+                        <input type="text" id="access_point_interface" placeholder="wlan1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="access_point_channel">Channel (1–14)</label>
+                        <input type="number" id="access_point_channel" min="1" max="14">
+                    </div>
+                    <div class="form-group">
+                        <label for="access_point_country_code">Country Code</label>
+                        <input type="text" id="access_point_country_code" maxlength="2">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="access_point_address">Fish Address</label>
+                        <input type="text" id="access_point_address">
+                    </div>
+                    <div class="form-group">
+                        <label for="access_point_prefix">Prefix Length</label>
+                        <input type="number" id="access_point_prefix" min="8" max="30">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="access_point_dhcp_start">DHCP Start</label>
+                        <input type="text" id="access_point_dhcp_start">
+                    </div>
+                    <div class="form-group">
+                        <label for="access_point_dhcp_end">DHCP End</label>
+                        <input type="text" id="access_point_dhcp_end">
+                    </div>
+                    <div class="form-group">
+                        <label for="access_point_dhcp_lease">Lease Time</label>
+                        <input type="text" id="access_point_dhcp_lease" placeholder="12h">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Reserved Addresses (MAC → IP)</label>
+                    <div class="item-list" id="ap-reserved"></div>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" id="btn-ap-add-reserved">+ Add Reservation</button>
+                    <button class="btn btn-primary" id="save-access-point">Save Access Point Settings</button>
+                </div>
+            </div>
+        </div>
+
     </main>
 </div>
 
@@ -1002,6 +1305,9 @@ document.addEventListener('DOMContentLoaded', () => {
             setVal('sensors_poll_interval_s', sn.poll_interval_s);
             renderSensorRows(sn.sensors || []);
 
+            // Speaker & Mixing, Spotify, Bluetooth, Access Point
+            fillConnectivityConfig(c);
+
         } catch (e) {
             showToast('Failed to load configuration', 'error');
         }
@@ -1176,6 +1482,7 @@ document.addEventListener('DOMContentLoaded', () => {
             devicesLoaded = true;
             populateDeviceSelect('audio_device_select', data.capture || []);
             populateDeviceSelect('tts_device_select', data.playback || []);
+            populateDeviceSelect('out_device_select', data.playback || []);
             renderDetectedCameras(data.cameras || []);
             return data;
         } catch (e) {
@@ -1985,6 +2292,441 @@ document.addEventListener('DOMContentLoaded', () => {
         // first opened (avoids the subprocess-heavy scan on dashboard load).
         if ((name === 'audio' || name === 'vision') && !devicesLoaded) loadDevices();
         if (name !== 'vision') stopVisionRefresh();
+    };
+
+    // =====================================================================
+    // Speaker & Mixing / Spotify / Bluetooth / Access Point
+    // =====================================================================
+    function pill(text, kind = '') {
+        return `<span class="pill ${kind}">${esc(text)}</span>`;
+    }
+
+    function setNotice(id, html, kind = '') {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = html ? '' : 'none';
+        el.className = 'notice' + (kind ? ' ' + kind : '');
+        el.innerHTML = html || '';
+    }
+
+    function fmtMs(ms) {
+        const s = Math.floor((ms || 0) / 1000);
+        return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+
+    // Run an action button: disable it while in flight, toast the result.
+    async function runAction(btn, method, path, body, after) {
+        if (btn) btn.disabled = true;
+        try {
+            const resp = await api(method, path, body);
+            showToast(resp.status || resp.error || 'Done', resp.error ? 'error' : 'info');
+            if (after) await after();
+            return resp;
+        } catch (e) {
+            showToast('Request failed', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    // Called from loadConfig() with the full config.
+    function fillConnectivityConfig(c) {
+        const sp = c.spotify || {};
+        setVal('spotify_enabled', sp.enabled);
+        setVal('spotify_device_name', sp.device_name);
+        setVal('spotify_market', sp.market || '');
+        setVal('spotify_duck_mode', sp.duck_mode || 'volume');
+        setVal('spotify_duck_percent', sp.duck_percent ?? 30);
+        document.getElementById('readout-duck-percent').textContent = (sp.duck_percent ?? 30) + '%';
+        updateDuckRow();
+
+        setVal('out_audio_device', (c.tts || {}).audio_device);
+
+        const bt = c.bluetooth || {};
+        setVal('bluetooth_enabled', bt.enabled);
+        setVal('bluetooth_auto_connect', bt.auto_connect ?? true);
+        setVal('bluetooth_default_speaker', bt.default_speaker);
+        setVal('bluetooth_scan_timeout_s', bt.scan_timeout_s ?? 10);
+
+        const ap = c.access_point || {};
+        ['ssid', 'interface', 'channel', 'country_code', 'address', 'prefix',
+         'dhcp_start', 'dhcp_end', 'dhcp_lease'].forEach(k => setVal('access_point_' + k, ap[k]));
+        setVal('access_point_enabled', ap.enabled);
+        setVal('access_point_stop_on_shutdown', ap.stop_on_shutdown);
+        renderReserved(ap.reserved || {});
+    }
+
+    // ---------------- Speaker & Mixing ----------------
+    function updateDuckRow() {
+        const mode = getVal('spotify_duck_mode');
+        document.getElementById('duck-percent-row').style.display = mode === 'volume' ? '' : 'none';
+    }
+    document.getElementById('spotify_duck_mode').addEventListener('change', updateDuckRow);
+    document.getElementById('spotify_duck_percent').addEventListener('input', (e) => {
+        document.getElementById('readout-duck-percent').textContent = e.target.value + '%';
+    });
+
+    async function loadOutput() {
+        try {
+            const o = await api('GET', '/api/audio/output');
+            document.getElementById('out-device').innerHTML =
+                esc(o.audio_device || '—') + ' ' + (o.device_shared ? pill('shareable', 'ok') : pill('exclusive', 'warn'));
+            document.getElementById('out-mixer').innerHTML =
+                o.mixer_installed ? pill('installed', 'ok') : pill('not found', 'bad');
+            const modes = { volume: `Turn down to ${o.duck_percent}%`, pause: 'Pause, then resume', off: 'Leave alone' };
+            document.getElementById('out-mode').textContent = modes[o.duck_mode] || o.duck_mode;
+            document.getElementById('out-services').innerHTML =
+                (o.spotify_running ? pill('Spotify', 'ok') : pill('Spotify off')) + ' ' +
+                (o.bluetooth_running ? pill('Bluetooth', 'ok') : pill('Bluetooth off'));
+
+            // Explain any configuration that will make the fish's voice fail.
+            let notice = '', kind = '';
+            if (o.duck_mode === 'volume' && !o.device_shared) {
+                notice = `The fish's voice is on <code>${esc(o.audio_device)}</code>, which only one program can use at a time. ` +
+                         `While music plays it will fail with "Device or resource busy". Switch it to <code>fishout</code>, ` +
+                         `or set the mode to <b>Pause, then resume</b>.`;
+            } else if (o.audio_device === 'fishout' && !o.mixer_installed) {
+                notice = `<code>fishout</code> isn't defined on this machine, so the fish can't play audio. ` +
+                         `Add it to <code>/etc/asound.conf</code> (see spotify/README.md).`;
+            } else if (o.mixer_installed && o.device_shared) {
+                notice = 'The shared mixer is set up, so the fish and the music can play at the same time.';
+                kind = 'ok';
+            }
+            setNotice('out-notice', notice, kind);
+        } catch (e) {
+            showToast('Failed to load audio output status', 'error');
+        }
+    }
+
+    document.getElementById('btn-refresh-output').addEventListener('click', loadOutput);
+    document.getElementById('out_device_select').addEventListener('change', (e) => {
+        if (e.target.value) setVal('out_audio_device', e.target.value);
+    });
+    document.getElementById('btn-refresh-outputs').addEventListener('click', async () => {
+        const d = await loadDevices(true);
+        showToast(d ? `Found ${(d.playback || []).length} output(s)` : 'Device scan failed', d ? 'info' : 'error');
+    });
+    document.getElementById('save-output-device').addEventListener('click', async () => {
+        const device = getVal('out_audio_device').trim();
+        await saveSection('tts', { audio_device: device });
+        setVal('tts_audio_device', device);  // keep the TTS page in sync
+        loadOutput();
+    });
+    document.getElementById('save-ducking').addEventListener('click', async () => {
+        await saveSection('spotify', {
+            duck_mode: getVal('spotify_duck_mode'),
+            duck_percent: getVal('spotify_duck_percent', 'int'),
+        });
+        loadOutput();
+    });
+    document.getElementById('btn-test-output').addEventListener('click', (e) => {
+        runAction(e.currentTarget, 'POST', '/api/audio/test', { text: getVal('out_test_text') });
+    });
+
+    // ---------------- Spotify ----------------
+    let spotifyTimer = null;
+    let spotifyPlaying = false;
+    let spotifyShuffle = false;
+    let volumeDragging = false;
+
+    async function loadSpotify() {
+        let data;
+        try {
+            data = await api('GET', '/api/spotify/state');
+        } catch (e) {
+            return;
+        }
+        document.querySelectorAll('#sec-spotify .sp-btn, #sp-volume').forEach(b => b.disabled = !data.available);
+        if (!data.available) {
+            setNotice('sp-notice', 'Spotify isn\'t running. Enable it below, add credentials to <code>config/secrets.json</code>, run <code>python -m spotify.spotify_auth</code> once, then restart Fishseus.');
+            document.getElementById('sp-devices').innerHTML = '<p class="item-empty">Spotify is not running.</p>';
+            return;
+        }
+        setNotice('sp-notice', data.error ? esc(data.error) : '');
+
+        const p = data.playback || {};
+        spotifyPlaying = !!p.is_playing;
+        spotifyShuffle = !!p.shuffle;
+        document.getElementById('sp-title').textContent = p.title || 'Nothing playing';
+        document.getElementById('sp-artist').textContent = [p.artists, p.album].filter(Boolean).join(' — ');
+        document.getElementById('sp-device').innerHTML = p.device
+            ? `on ${esc(p.device)} ${p.is_playing ? pill('playing', 'ok') : pill('paused')}${p.ducked ? ' ' + pill('ducked for speech', 'warn') : ''}`
+            : '';
+        const art = document.getElementById('sp-art-box');
+        art.innerHTML = p.image ? `<img class="np-art" src="${esc(p.image)}" alt="">` : '🐟';
+        document.getElementById('sp-progress').style.width =
+            p.duration_ms ? Math.min(100, 100 * p.progress_ms / p.duration_ms) + '%' : '0';
+        document.getElementById('sp-pos').textContent = fmtMs(p.progress_ms);
+        document.getElementById('sp-dur').textContent = fmtMs(p.duration_ms);
+        document.getElementById('sp-playpause').textContent = p.is_playing ? '⏸' : '▶';
+        document.getElementById('sp-shuffle').className = 'btn btn-sm sp-btn ' + (p.shuffle ? 'btn-primary' : 'btn-secondary');
+        if (!volumeDragging && p.volume !== undefined && p.volume !== null) {
+            document.getElementById('sp-volume').value = p.volume;
+            document.getElementById('sp-volume-readout').textContent = p.volume + '%';
+        }
+
+        const list = document.getElementById('sp-devices');
+        const devices = data.devices || [];
+        if (!devices.length) {
+            list.innerHTML = '<p class="item-empty">No Spotify Connect devices online. Is raspotify running?</p>';
+            return;
+        }
+        list.innerHTML = '';
+        devices.forEach(d => {
+            const row = document.createElement('div');
+            row.className = 'item-row';
+            row.innerHTML = `
+                <div class="item-main">
+                    <div class="item-name">${esc(d.name)}</div>
+                    <div class="item-meta">${esc(d.type)}${d.volume !== null && d.volume !== undefined ? ' · vol ' + d.volume + '%' : ''}</div>
+                </div>
+                ${d.is_active ? pill('active', 'ok') : '<button class="btn btn-secondary btn-sm">Play here</button>'}
+            `;
+            const btn = row.querySelector('button');
+            if (btn) btn.addEventListener('click', () =>
+                runAction(btn, 'POST', '/api/spotify/transfer', { device_id: d.id }, loadSpotify));
+            list.appendChild(row);
+        });
+    }
+
+    function startSpotifyPolling() {
+        stopSpotifyPolling();
+        loadSpotify();
+        spotifyTimer = setInterval(loadSpotify, 3000);
+    }
+    function stopSpotifyPolling() {
+        if (spotifyTimer) clearInterval(spotifyTimer);
+        spotifyTimer = null;
+    }
+
+    document.querySelectorAll('#sec-spotify .sp-btn[data-action]').forEach(btn => {
+        btn.addEventListener('click', () =>
+            runAction(btn, 'POST', '/api/spotify/' + btn.dataset.action, {}, loadSpotify));
+    });
+    document.getElementById('sp-playpause').addEventListener('click', (e) =>
+        runAction(e.currentTarget, 'POST', '/api/spotify/' + (spotifyPlaying ? 'pause' : 'resume'), {}, loadSpotify));
+    document.getElementById('sp-shuffle').addEventListener('click', (e) =>
+        runAction(e.currentTarget, 'POST', '/api/spotify/shuffle', { state: !spotifyShuffle }, loadSpotify));
+    const spVolume = document.getElementById('sp-volume');
+    spVolume.addEventListener('input', () => {
+        volumeDragging = true;
+        document.getElementById('sp-volume-readout').textContent = spVolume.value + '%';
+    });
+    spVolume.addEventListener('change', async () => {
+        await runAction(null, 'POST', '/api/spotify/volume', { percent: parseInt(spVolume.value, 10) });
+        volumeDragging = false;
+    });
+    function playQuery() {
+        const query = getVal('sp-query').trim();
+        if (!query) return;
+        runAction(document.getElementById('sp-play-query'), 'POST', '/api/spotify/play',
+                  { query, kind: getVal('sp-kind') }, loadSpotify);
+    }
+    document.getElementById('sp-play-query').addEventListener('click', playQuery);
+    document.getElementById('sp-query').addEventListener('keydown', (e) => { if (e.key === 'Enter') playQuery(); });
+
+    document.getElementById('save-spotify').addEventListener('click', () => {
+        saveSection('spotify', {
+            enabled: getVal('spotify_enabled'),
+            device_name: getVal('spotify_device_name').trim(),
+            market: getVal('spotify_market').trim().toUpperCase(),
+        });
+    });
+
+    // ---------------- Bluetooth ----------------
+    async function loadBluetooth() {
+        let data;
+        try {
+            data = await api('GET', '/api/bluetooth/devices');
+        } catch (e) {
+            return;
+        }
+        document.querySelectorAll('#btn-bt-scan').forEach(b => b.disabled = !data.available);
+        const list = document.getElementById('bt-devices');
+        if (!data.available) {
+            document.getElementById('bt-service').innerHTML = pill('not running', 'bad');
+            ['bt-powered', 'bt-connected', 'bt-default'].forEach(id => document.getElementById(id).textContent = '—');
+            setNotice('bt-notice', 'Bluetooth isn\'t running. Enable it below and restart Fishseus.');
+            list.innerHTML = '<p class="item-empty">Bluetooth is not running.</p>';
+            return;
+        }
+        const st = data.status || {};
+        document.getElementById('bt-service').innerHTML = pill('running', 'ok');
+        document.getElementById('bt-powered').innerHTML = st.powered ? pill('on', 'ok') : pill('off', 'bad');
+        document.getElementById('bt-connected').textContent = (st.connected || []).join(', ') || 'Nothing';
+        document.getElementById('bt-default').textContent = st.default_speaker || 'Not set';
+        setNotice('bt-notice', data.error || st.last_error ? esc(data.error || st.last_error) : '');
+
+        const devices = data.devices || [];
+        if (!devices.length) {
+            list.innerHTML = '<p class="item-empty">No known devices. Put your speaker in pairing mode and press Scan.</p>';
+            return;
+        }
+        // Connected first, then paired, then everything discovered.
+        devices.sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || a.name.localeCompare(b.name));
+        list.innerHTML = '';
+        devices.forEach(d => {
+            const row = document.createElement('div');
+            row.className = 'item-row';
+            const badges = [
+                d.connected ? pill('connected', 'ok') : '',
+                d.paired ? pill('paired') : pill('not paired', 'warn'),
+                d.icon && d.icon.startsWith('audio') ? pill('speaker') : '',
+            ].join(' ');
+            row.innerHTML = `
+                <div class="item-main">
+                    <div class="item-name">${esc(d.name)}</div>
+                    <div class="item-meta">${esc(d.mac)}</div>
+                </div>
+                <div>${badges}</div>
+                <div class="btn-group" style="margin:0;"></div>
+            `;
+            const actions = row.querySelector('.btn-group');
+            const addBtn = (label, cls, fn) => {
+                const b = document.createElement('button');
+                b.className = 'btn btn-sm ' + cls;
+                b.textContent = label;
+                b.addEventListener('click', () => fn(b));
+                actions.appendChild(b);
+            };
+            const act = (action) => (b) =>
+                runAction(b, 'POST', '/api/bluetooth/' + action, { target: d.mac }, loadBluetooth);
+            if (!d.paired) addBtn('Pair', 'btn-primary', act('pair'));
+            else if (d.connected) addBtn('Disconnect', 'btn-secondary', act('disconnect'));
+            else addBtn('Connect', 'btn-primary', act('connect'));
+            if (d.paired) addBtn('Make default', 'btn-secondary', async (b) => {
+                setVal('bluetooth_default_speaker', d.name);
+                b.disabled = true;
+                await saveSection('bluetooth', { default_speaker: d.name });
+                b.disabled = false;
+            });
+            if (d.paired) addBtn('Forget', 'btn-danger', (b) => {
+                if (confirm(`Forget ${d.name}? You'll need to pair it again.`)) act('forget')(b);
+            });
+            list.appendChild(row);
+        });
+    }
+
+    document.getElementById('btn-bt-refresh').addEventListener('click', loadBluetooth);
+    document.getElementById('btn-bt-scan').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        btn.textContent = '📡 Scanning…';
+        runAction(btn, 'POST', '/api/bluetooth/scan', {}, loadBluetooth)
+            .finally(() => { btn.textContent = '📡 Scan'; });
+    });
+    document.getElementById('save-bluetooth').addEventListener('click', () => {
+        saveSection('bluetooth', {
+            enabled: getVal('bluetooth_enabled'),
+            auto_connect: getVal('bluetooth_auto_connect'),
+            default_speaker: getVal('bluetooth_default_speaker').trim(),
+            scan_timeout_s: getVal('bluetooth_scan_timeout_s', 'float') || 10,
+        });
+    });
+
+    // ---------------- Access Point ----------------
+    function renderReserved(reserved) {
+        const container = document.getElementById('ap-reserved');
+        container.innerHTML = '';
+        Object.entries(reserved).forEach(([mac, ip]) => addReservedRow(mac, ip));
+        if (!container.children.length) {
+            container.innerHTML = '<p class="item-empty ap-reserved-empty">No reservations.</p>';
+        }
+    }
+
+    function addReservedRow(mac = '', ip = '') {
+        const container = document.getElementById('ap-reserved');
+        const empty = container.querySelector('.ap-reserved-empty');
+        if (empty) empty.remove();
+        const row = document.createElement('div');
+        row.className = 'item-row inline-form ap-reserved-row';
+        row.innerHTML = `
+            <input type="text" data-rk="mac" value="${esc(mac)}" placeholder="44:1b:f6:93:3e:50">
+            <span style="color:var(--text-muted);">→</span>
+            <input type="text" data-rk="ip" value="${esc(ip)}" placeholder="192.168.50.51">
+            <button class="btn btn-danger btn-sm">✕</button>
+        `;
+        row.querySelector('button').addEventListener('click', () => {
+            row.remove();
+            if (!container.querySelector('.ap-reserved-row')) renderReserved({});
+        });
+        container.appendChild(row);
+    }
+
+    async function loadAccessPoint() {
+        let data;
+        try {
+            data = await api('GET', '/api/access_point/state');
+        } catch (e) {
+            return;
+        }
+        document.getElementById('btn-ap-restart').disabled = !data.available;
+        const clients = document.getElementById('ap-clients');
+        if (!data.available) {
+            document.getElementById('ap-state').innerHTML = pill('not running', 'bad');
+            ['ap-ssid', 'ap-iface', 'ap-address'].forEach(id => document.getElementById(id).textContent = '—');
+            setNotice('ap-notice', 'The access point service isn\'t running. Enable it below and restart Fishseus. The fish\'s start-up log says why it failed.');
+            clients.innerHTML = '<p class="item-empty">Access point is not running.</p>';
+            return;
+        }
+        const st = data.status || {};
+        document.getElementById('ap-state').innerHTML = st.running ? pill('broadcasting', 'ok') : pill('stopped', 'bad');
+        document.getElementById('ap-ssid').textContent = st.ssid || '—';
+        document.getElementById('ap-iface').textContent = st.interface || '—';
+        document.getElementById('ap-address').textContent = st.address || '—';
+        setNotice('ap-notice', data.error || st.last_error ? esc(data.error || st.last_error).replace(/\n/g, '<br>') : '');
+
+        const list = data.clients || [];
+        clients.innerHTML = list.length ? '' : '<p class="item-empty">No devices connected.</p>';
+        list.forEach(c => {
+            const row = document.createElement('div');
+            row.className = 'item-row';
+            row.innerHTML = `
+                <div class="item-main">
+                    <div class="item-name">${esc(c.hostname || c.ip || 'Unknown device')}</div>
+                    <div class="item-meta">${esc(c.mac)}${c.ip ? ' · ' + esc(c.ip) : ''}</div>
+                </div>
+            `;
+            clients.appendChild(row);
+        });
+    }
+
+    document.getElementById('btn-ap-refresh').addEventListener('click', loadAccessPoint);
+    document.getElementById('btn-ap-add-reserved').addEventListener('click', () => addReservedRow());
+    document.getElementById('btn-ap-restart').addEventListener('click', (e) => {
+        if (!confirm('Restart the access point? The turret and camera will drop off the network for a few seconds.')) return;
+        runAction(e.currentTarget, 'POST', '/api/access_point/restart', {}, loadAccessPoint);
+    });
+    document.getElementById('save-access-point').addEventListener('click', () => {
+        const reserved = {};
+        document.querySelectorAll('#ap-reserved .ap-reserved-row').forEach(row => {
+            const mac = row.querySelector('[data-rk="mac"]').value.trim().toLowerCase();
+            const ip = row.querySelector('[data-rk="ip"]').value.trim();
+            if (mac && ip) reserved[mac] = ip;
+        });
+        saveSection('access_point', {
+            enabled: getVal('access_point_enabled'),
+            stop_on_shutdown: getVal('access_point_stop_on_shutdown'),
+            ssid: getVal('access_point_ssid').trim(),
+            interface: getVal('access_point_interface').trim(),
+            channel: getVal('access_point_channel', 'int'),
+            country_code: getVal('access_point_country_code').trim().toUpperCase(),
+            address: getVal('access_point_address').trim(),
+            prefix: getVal('access_point_prefix', 'int'),
+            dhcp_start: getVal('access_point_dhcp_start').trim(),
+            dhcp_end: getVal('access_point_dhcp_end').trim(),
+            dhcp_lease: getVal('access_point_dhcp_lease').trim(),
+            reserved: reserved,
+        });
+    });
+
+    // Load each page's live state when it is opened; poll Spotify while visible.
+    const _origSwitch3 = switchSection;
+    switchSection = function(name) {
+        _origSwitch3(name);
+        if (name === 'output') { loadOutput(); if (!devicesLoaded) loadDevices(); }
+        if (name === 'spotify') startSpotifyPolling(); else stopSpotifyPolling();
+        if (name === 'bluetooth') loadBluetooth();
+        if (name === 'access_point') loadAccessPoint();
     };
 
     // Add inline toggle styles

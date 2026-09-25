@@ -80,6 +80,9 @@ class TtsConfig(ServiceConfig):
 
 
 class TtsService(Service):
+    # How long play_wav() keeps retrying while the ALSA device reports busy.
+    BUSY_RETRY_S = 2.0
+
     # Throwaway line sent after each real utterance. piper writes one WAV per
     # stdin line and closes each file before opening the next, so the appearance
     # of the sentinel's WAV is proof the real utterance's WAV is fully written.
@@ -350,7 +353,15 @@ class TtsService(Service):
         cmd = ["aplay", "-D", self.config.audio_device, str(wav_path)]
         try:
             if blocking:
-                proc = subprocess.run(cmd, capture_output=True, text=True)
+                # Another player (e.g. raspotify) may hold the ALSA device for a
+                # moment after being paused — retry briefly rather than fail.
+                deadline = time.monotonic() + self.BUSY_RETRY_S
+                while True:
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    busy = proc.returncode != 0 and "busy" in proc.stderr.lower()
+                    if not busy or time.monotonic() >= deadline:
+                        break
+                    time.sleep(0.2)
                 if proc.returncode != 0:
                     raise TtsServiceError(
                         f"aplay failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"

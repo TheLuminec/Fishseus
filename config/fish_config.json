@@ -31,7 +31,7 @@
     "piper_binary": "../tts/.venv/bin/piper",
     "voices_dir": "../tts/voices",
     "default_voice": "en_US-arctic-medium",
-    "audio_device": "plughw:0,0",
+    "audio_device": "fishout",
     "output_dir": "../tmp/tts"
   },
   "motion": {
@@ -96,6 +96,7 @@
     "enabled": false,
     "device_name": "Fishseus",
     "redirect_uri": "http://127.0.0.1:8888/callback",
+    "duck_mode": "volume",
     "duck_percent": 30
   },
   "access_point": {

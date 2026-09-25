@@ -244,7 +244,8 @@ _CSP = (
     "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com; "
-    "img-src 'self' data:; "
+    # i.scdn.co: Spotify album art on the Spotify page.
+    "img-src 'self' data: https://i.scdn.co; "
     "connect-src 'self'; "
     "base-uri 'self'; "
     "form-action 'self'; "
