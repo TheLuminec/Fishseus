@@ -67,6 +67,10 @@ _available: dict[str, bool] = {
     "tts": False,
     "vision": False,
     "sensors": False,
+    # Connectivity services are only ever injected by the orchestrator.
+    "bluetooth": False,
+    "spotify": False,
+    "access_point": False,
 }
 
 # Audio (requires ALSA / arecord — Linux only)
@@ -279,6 +283,9 @@ _motion: "MotionService | None" = None
 _tts: "TtsService | None" = None
 _vision: "VisionService | None" = None
 _sensors = None  # SensorService — only ever injected by the orchestrator
+_bluetooth = None     # BluetoothService — orchestrator only
+_spotify = None       # SpotifyService — orchestrator only
+_access_point = None  # AccessPointService — orchestrator only
 _tool_registry = None  # injected by orchestrator via set_tool_registry()
 
 # Rolling amplitude buffer for the live graph
@@ -512,6 +519,8 @@ def reset_services() -> None:
     _available["tts"] = TtsService is not None
     _available["vision"] = VisionService is not None
     _available["sensors"] = False  # only ever available via orchestrator injection
+    for key in ("bluetooth", "spotify", "access_point"):
+        _available[key] = False
 
 
 def set_tool_registry(registry) -> None:
@@ -533,6 +542,9 @@ def set_services(
     tts=None,
     vision=None,
     sensors=None,
+    bluetooth=None,
+    spotify=None,
+    access_point=None,
 ) -> None:
     """
     Inject pre-initialised service instances from an external orchestrator.
@@ -542,6 +554,7 @@ def set_services(
     None is left unchanged.
     """
     global _audio, _llm, _assistant, _motion, _tts, _vision, _sensors
+    global _bluetooth, _spotify, _access_point
 
     if audio is not None:
         _audio = audio
@@ -564,6 +577,15 @@ def set_services(
     if sensors is not None:
         _sensors = sensors
         _available["sensors"] = True
+    if bluetooth is not None:
+        _bluetooth = bluetooth
+        _available["bluetooth"] = True
+    if spotify is not None:
+        _spotify = spotify
+        _available["spotify"] = True
+    if access_point is not None:
+        _access_point = access_point
+        _available["access_point"] = True
 
 
 def shutdown_services() -> None:
@@ -658,6 +680,9 @@ def api_status():
                 "tts": "ready" if _available["tts"] and _tts is not None else "unavailable",
                 "vision": "ready" if _available["vision"] and _vision is not None else "unavailable",
                 "sensors": "ready" if _available["sensors"] and _sensors is not None else "unavailable",
+                "bluetooth": "ready" if _available["bluetooth"] and _bluetooth is not None else "unavailable",
+                "spotify": "ready" if _available["spotify"] and _spotify is not None else "unavailable",
+                "access_point": "ready" if _available["access_point"] and _access_point is not None else "unavailable",
             }
         }
     )

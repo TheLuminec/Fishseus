@@ -17,3 +17,7 @@ PyJWT[crypto]>=2.6
 # See deployment notes; run with e.g.:
 #   waitress-serve --host 127.0.0.1 --port 8000 web.web_server:app
 waitress>=2.1
+
+# Spotify playback control (spotify/spotify_service.py). Optional — the
+# orchestrator skips the Spotify service if it is missing.
+spotipy>=2.24

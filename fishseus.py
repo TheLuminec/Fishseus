@@ -50,6 +50,9 @@ from motion.motion_service import MotionConfig, MotionService, MotorConfig
 from tts.tts_service import TtsConfig, TtsService
 from vision.vision_service import VisionConfig, VisionService
 from sensors.sensor_service import SensorConfig, SensorService, SensorEvent
+from bluetooth.bluetooth_service import BluetoothConfig, BluetoothService
+from spotify.spotify_service import SpotifyConfig, SpotifyService
+from access_point.access_point_service import AccessPointConfig, AccessPointService
 from assistant.tools import build_tool_registry
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -96,6 +99,9 @@ class Fishseus:
         self.tts: Optional[TtsService] = None
         self.vision: Optional[VisionService] = None
         self.sensors: Optional[SensorService] = None
+        self.bluetooth: Optional[BluetoothService] = None
+        self.spotify: Optional[SpotifyService] = None
+        self.access_point: Optional[AccessPointService] = None
 
         # Sensor events queued by the watcher thread, consumed by run().
         self._event_queue: "Queue[SensorEvent]" = Queue()
@@ -123,6 +129,9 @@ class Fishseus:
         asst_cfg    = app_config.get("assistant", {})
         vision_cfg  = app_config.get("vision", {})
         sensors_cfg = app_config.get("sensors", {})
+        bt_cfg      = app_config.get("bluetooth", {})
+        spotify_cfg = app_config.get("spotify", {})
+        ap_cfg      = app_config.get("access_point", {})
 
         self._speech_wav.parent.mkdir(parents=True, exist_ok=True)
 
@@ -187,6 +196,14 @@ class Fishseus:
         else:
             _log("init", "Sensors disabled")
 
+        # Optional connectivity services — each degrades to None on failure.
+        self.access_point = self._start_optional(
+            "access_point", ap_cfg, AccessPointService, AccessPointConfig)
+        self.bluetooth = self._start_optional(
+            "bluetooth", bt_cfg, BluetoothService, BluetoothConfig)
+        self.spotify = self._start_optional(
+            "spotify", spotify_cfg, SpotifyService, SpotifyConfig)
+
         # Assistant
         _log("init", "Starting assistant service…")
         tool_registry = build_tool_registry(
@@ -195,6 +212,9 @@ class Fishseus:
             get_assistant= lambda: self.assistant,
             get_vision   = lambda: self.vision,
             get_sensors  = lambda: self.sensors,
+            get_bluetooth    = lambda: self.bluetooth,
+            get_spotify      = lambda: self.spotify,
+            get_access_point = lambda: self.access_point,
         )
         self.assistant = AssistantService(
             llm=self.llm,
@@ -393,6 +413,9 @@ class Fishseus:
 
         if not already_suppressed:
             self.audio.stop_capture()
+            # Turn the music down so the fish can be heard over it.
+            if self.spotify is not None:
+                self.spotify.duck()
 
         try:
             _log("tts", "Synthesising response…")
@@ -419,6 +442,8 @@ class Fishseus:
 
         finally:
             if cooldown:
+                if self.spotify is not None:
+                    self.spotify.unduck()
                 self.audio.start_capture(amplitude_callback=self._on_amplitude)
                 with self._speaking_lock:
                     self._speaking = False
@@ -446,6 +471,21 @@ class Fishseus:
     # -------------------------------------------------------------------
     # Service construction helpers
     # -------------------------------------------------------------------
+
+    def _start_optional(self, name: str, cfg: dict, service_cls, config_cls):
+        """Build and initialise an opt-in service ("enabled": true), or return None."""
+        cfg = dict(cfg)
+        if not cfg.pop("enabled", False):
+            _log("init", f"{name} disabled")
+            return None
+        _log("init", f"Starting {name} service…")
+        try:
+            service = service_cls(config_cls(**cfg))
+            service.initialize()
+            return service
+        except Exception as exc:
+            _log("init", f"{name} service failed to start: {exc}")
+            return None
 
     def _build_motion_service(self, motion_cfg: dict) -> MotionService:
         # Motors live on the HAT's ATtiny1614 now, addressed by channel
@@ -506,6 +546,9 @@ class Fishseus:
                 tts       = self.tts,
                 vision    = self.vision,
                 sensors   = self.sensors,
+                bluetooth = self.bluetooth,
+                spotify   = self.spotify,
+                access_point = self.access_point,
             )
             if self.assistant is not None:
                 _web.set_tool_registry(self.assistant.tool_registry)
@@ -568,6 +611,14 @@ class Fishseus:
                 self.vision.shutdown()
             except Exception as exc:
                 _log("shutdown", f"Vision error: {exc}")
+
+        for name in ("spotify", "bluetooth", "access_point"):
+            service = getattr(self, name)
+            if service is not None:
+                try:
+                    service.shutdown()
+                except Exception as exc:
+                    _log("shutdown", f"{name} error: {exc}")
 
         if self.tts is not None:
             try:

@@ -2,3 +2,7 @@
 __pycache__/
 .venv/
 *.pyc
+# Credentials and tokens (see config/secrets.example.json)
+config/secrets.json
+data/spotify_token.json
+tmp/

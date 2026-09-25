@@ -86,6 +86,35 @@
     "poll_interval_s": 0.05,
     "sensors": []
   },
+  "bluetooth": {
+    "enabled": false,
+    "default_speaker": "",
+    "auto_connect": true,
+    "scan_timeout_s": 10.0
+  },
+  "spotify": {
+    "enabled": false,
+    "device_name": "Fishseus",
+    "redirect_uri": "http://127.0.0.1:8888/callback",
+    "duck_percent": 30
+  },
+  "access_point": {
+    "enabled": false,
+    "ssid": "Fishseus",
+    "interface": "",
+    "country_code": "US",
+    "channel": 6,
+    "address": "192.168.50.1",
+    "prefix": 24,
+    "dhcp_start": "192.168.50.50",
+    "dhcp_end": "192.168.50.150",
+    "dhcp_lease": "12h",
+    "reserved": {
+      "44:1b:f6:93:3e:50": "192.168.50.51",
+      "44:1d:64:f5:e5:94": "192.168.50.52"
+    },
+    "stop_on_shutdown": false
+  },
   "web": {
     "bind_host": "127.0.0.1",
     "auth_enabled": true,

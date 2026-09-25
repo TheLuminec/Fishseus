@@ -23,9 +23,12 @@ from typing import TYPE_CHECKING, Callable, Optional
 from assistant.assistant_service import Tool, ToolRegistry
 
 if TYPE_CHECKING:
+    from access_point.access_point_service import AccessPointService
     from assistant.assistant_service import AssistantService
+    from bluetooth.bluetooth_service import BluetoothService
     from motion.motion_service import MotionService
     from sensors.sensor_service import SensorService
+    from spotify.spotify_service import SpotifyService
     from tts.tts_service import TtsService
     from vision.vision_service import VisionService
 
@@ -40,6 +43,9 @@ def build_tool_registry(
     get_assistant: Callable[[], Optional["AssistantService"]],
     get_vision: Callable[[], Optional["VisionService"]] = _none,
     get_sensors: Callable[[], Optional["SensorService"]] = _none,
+    get_bluetooth: Callable[[], Optional["BluetoothService"]] = _none,
+    get_spotify: Callable[[], Optional["SpotifyService"]] = _none,
+    get_access_point: Callable[[], Optional["AccessPointService"]] = _none,
 ) -> ToolRegistry:
     """
     Instantiate and populate the tool registry.
@@ -216,6 +222,87 @@ def build_tool_registry(
         return "; ".join(lines)
 
     # ------------------------------------------------------------------
+    # Music & speaker tools  (returns_data=True, synthesize_result=False)
+    # Each returns a short confirmation or a readable failure; the fish
+    # speaks it as-is so a missing device is explained, not swallowed.
+    # ------------------------------------------------------------------
+
+    def _spotify_call(action: Callable[["SpotifyService"], str]) -> str:
+        spotify = get_spotify()
+        if spotify is None:
+            return "Spotify is not connected"
+        try:
+            return action(spotify)
+        except Exception as exc:
+            return f"Spotify hiccup: {exc}"
+
+    def play_music(query: str = "", kind: str = "track") -> str:
+        return _spotify_call(lambda sp: sp.play(query, kind))
+
+    def pause_music() -> str:
+        return _spotify_call(lambda sp: sp.pause())
+
+    def resume_music() -> str:
+        return _spotify_call(lambda sp: sp.resume())
+
+    def skip_track() -> str:
+        return _spotify_call(lambda sp: sp.next_track())
+
+    def previous_track() -> str:
+        return _spotify_call(lambda sp: sp.previous_track())
+
+    def set_music_volume(percent: int = 50) -> str:
+        return _spotify_call(lambda sp: sp.set_volume(percent))
+
+    def now_playing() -> str:
+        return _spotify_call(lambda sp: sp.now_playing())
+
+    def connect_speaker(name: str = "") -> str:
+        bt = get_bluetooth()
+        if bt is None:
+            return "Bluetooth is not available"
+        try:
+            device = bt.connect(name)
+            return f"Connected to {device['name']}"
+        except Exception as exc:
+            return f"Couldn't connect the speaker: {exc}"
+
+    def pair_speaker(name: str = "") -> str:
+        bt = get_bluetooth()
+        if bt is None:
+            return "Bluetooth is not available"
+        if not name.strip():
+            return "Tell me the speaker's name to pair with"
+        try:
+            device = bt.pair(name)
+            return f"Paired and connected to {device['name']}"
+        except Exception as exc:
+            return f"Couldn't pair the speaker: {exc}"
+
+    def disconnect_speaker(name: str = "") -> str:
+        bt = get_bluetooth()
+        if bt is None:
+            return "Bluetooth is not available"
+        try:
+            names = bt.disconnect(name)
+            return f"Disconnected {', '.join(names)}" if names else "No speaker was connected"
+        except Exception as exc:
+            return f"Couldn't disconnect: {exc}"
+
+    def network_clients() -> str:
+        ap = get_access_point()
+        if ap is None:
+            return "The Fishseus Wi-Fi network is not running"
+        try:
+            clients = ap.clients()
+        except Exception as exc:
+            return f"Couldn't check the network: {exc}"
+        if not clients:
+            return "No devices are connected to the Fishseus network"
+        labels = [c["hostname"] or c["ip"] or c["mac"] for c in clients]
+        return f"{len(clients)} connected: {', '.join(labels)}"
+
+    # ------------------------------------------------------------------
     # Tool table
     # ------------------------------------------------------------------
     _tools = [
@@ -236,6 +323,17 @@ def build_tool_registry(
         Tool("check_sensors",    "Check when each sensor (motion detector etc.) last triggered. No args.", check_sensors,    "safe",  True,         False),
         Tool("list_voices",      "List available Piper TTS voices. No args.",                             list_voices,      "safe",  True,         False),
         Tool("set_voice",        "Set the TTS voice. Args: voice name string.",                           set_voice,        "safe",  False,        False),
+        Tool("play_music",       "Play music on Spotify. Args: query string (song, artist, album or playlist name, include the artist if said), kind — 'track' (default), 'artist', 'album' or 'playlist'.", play_music, "safe", True, False),
+        Tool("pause_music",      "Pause the Spotify music. No args.",                                     pause_music,      "safe",  True,         False),
+        Tool("resume_music",     "Resume paused Spotify music. No args.",                                 resume_music,     "safe",  True,         False),
+        Tool("skip_track",       "Skip to the next song. No args.",                                       skip_track,       "safe",  True,         False),
+        Tool("previous_track",   "Go back to the previous song. No args.",                                previous_track,   "safe",  True,         False),
+        Tool("set_music_volume", "Set the music volume. Args: percent int 0-100.",                        set_music_volume, "safe",  True,         False),
+        Tool("now_playing",      "Say which song is playing. No args.",                                   now_playing,      "safe",  True,         False),
+        Tool("connect_speaker",  "Connect an already-paired Bluetooth speaker. Args: name string (optional; empty = default speaker).", connect_speaker, "safe", True, False),
+        Tool("pair_speaker",     "Scan for and pair a new Bluetooth speaker in pairing mode. Args: name string.", pair_speaker, "safe", True, False),
+        Tool("disconnect_speaker", "Disconnect the Bluetooth speaker. Args: name string (optional).",     disconnect_speaker, "safe", True,        False),
+        Tool("network_clients",  "List devices connected to the Fishseus Wi-Fi network (turret, camera). No args.", network_clients, "safe", True, False),
     ]
     for t in _tools:
         registry.register(t)
