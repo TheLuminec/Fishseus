@@ -363,8 +363,17 @@ class TtsService(Service):
                         break
                     time.sleep(0.2)
                 if proc.returncode != 0:
+                    hint = ""
+                    if busy:
+                        hint = (
+                            f"\nHINT: another program is using the sound card directly, so "
+                            f"'{self.config.audio_device}' can't open it. If music is playing, "
+                            "raspotify is probably not going through the shared mixer: set "
+                            'LIBRESPOT_DEVICE="fishout" in /etc/raspotify/conf (see '
+                            "spotify/README.md)."
+                        )
                     raise TtsServiceError(
-                        f"aplay failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+                        f"aplay failed:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}{hint}"
                     )
             else:
                 subprocess.Popen(cmd)

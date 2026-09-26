@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fishseus — Control Panel</title>
     <meta name="description" content="Configuration and control panel for the Fishseus animatronic fish assistant.">
-    <link rel="stylesheet" href="/styles.css?v=2">  <!-- bump v when styles.css changes (served with a 1h cache) -->
+    <link rel="stylesheet" href="/styles.css?v=4">  <!-- bump v when styles.css changes (served with a 1h cache) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐟</text></svg>">
 </head>
 <body>
@@ -348,17 +348,97 @@
         <div class="content-section" id="sec-llm">
             <div class="section-header">
                 <h2>Language Model</h2>
-                <p>Configure the remote LLM endpoint (Ollama / OpenAI-compatible).</p>
+                <p>Choose which LLM provider the fish thinks with: local Ollama, xAI Grok, or any OpenAI-compatible endpoint.</p>
             </div>
+
             <div class="card">
-                <div class="form-group">
-                    <label for="llm_endpoint_url">Endpoint URL</label>
-                    <input type="url" id="llm_endpoint_url">
+                <div class="card-title"><span class="card-icon">🧠</span> Active Provider</div>
+                <div class="kv-grid" style="margin-bottom:16px;">
+                    <div class="kv-item"><span class="kv-label">Running now</span><span class="kv-value" id="llm-live-provider">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Model</span><span class="kv-value" id="llm-live-model">—</span></div>
+                    <div class="kv-item"><span class="kv-label">Endpoint</span><span class="kv-value" id="llm-live-endpoint" style="font-size:12px;">—</span></div>
+                </div>
+                <div class="inline-form">
+                    <select id="llm_active_provider"></select>
+                    <button class="btn btn-primary" id="btn-llm-activate">Use This Provider</button>
+                </div>
+                <p class="hint" style="margin:10px 0 0;">Switches immediately, no restart needed.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🛠️</span> Provider Settings</div>
+                <div class="inline-form" style="margin-bottom:16px;">
+                    <select id="llm_edit_provider"></select>
+                    <select id="llm_add_preset">
+                        <option value="">+ Add provider…</option>
+                        <option value="xai">xAI Grok</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="ollama">Ollama</option>
+                        <option value="custom">Other OpenAI-compatible</option>
+                    </select>
+                    <button class="btn btn-danger btn-sm" id="btn-llm-remove">Remove</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="llm_p_label">Display Name</label>
+                        <input type="text" id="llm_p_label">
+                    </div>
+                    <div class="form-group">
+                        <label for="llm_p_api_type">Request Style</label>
+                        <select id="llm_p_api_type">
+                            <option value="openai">OpenAI-compatible (xAI, OpenAI, LM Studio…)</option>
+                            <option value="ollama">Ollama</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label for="llm_model">Model</label>
-                    <input type="text" id="llm_model">
+                    <label for="llm_p_endpoint_url">Chat Completions URL</label>
+                    <input type="url" id="llm_p_endpoint_url" placeholder="https://api.x.ai/v1/chat/completions">
                 </div>
+                <div class="form-group">
+                    <label for="llm_p_model">Model</label>
+                    <div class="inline-form">
+                        <input type="text" id="llm_p_model" list="llm-model-list" placeholder="grok-4.20-0309-non-reasoning">
+                        <datalist id="llm-model-list"></datalist>
+                        <button class="btn btn-secondary btn-sm" id="btn-llm-models">↓ Load Models</button>
+                    </div>
+                </div>
+                <div class="form-group" id="llm-row-reasoning-effort">
+                    <label for="llm_p_reasoning_effort">Reasoning Effort</label>
+                    <select id="llm_p_reasoning_effort" style="max-width:360px;">
+                        <option value="">Don't send (non-reasoning models)</option>
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                    </select>
+                </div>
+                <div class="form-group" id="llm-row-disable-reasoning">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="llm_p_disable_reasoning">
+                        Disable Reasoning / Thinking
+                    </label>
+                </div>
+                <div class="notice" id="llm-model-notice" style="display:none;"></div>
+
+                <div class="form-group" style="margin-top:16px;">
+                    <label for="llm_p_api_key">API Key <span id="llm-key-status"></span></label>
+                    <div class="inline-form">
+                        <input type="password" id="llm_p_api_key" autocomplete="off" placeholder="Paste a new key to set or replace it">
+                        <button class="btn btn-secondary btn-sm" id="btn-llm-save-key">Save Key</button>
+                        <button class="btn btn-danger btn-sm" id="btn-llm-clear-key">Clear</button>
+                    </div>
+                    <p class="hint" style="margin:6px 0 0;">Stored in <code>config/secrets.json</code>, never shown again. Local Ollama doesn't need one.</p>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="save-llm-provider">Save Provider</button>
+                    <button class="btn btn-secondary" id="btn-llm-test">▶ Test</button>
+                </div>
+                <div class="notice ok" id="llm-test-result" style="display:none;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🎛️</span> Generation (all providers)</div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="llm_temperature">Temperature</label>
@@ -369,14 +449,8 @@
                         <input type="number" id="llm_max_tokens" min="50">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="llm_disable_reasoning">
-                        Disable Reasoning / Thinking
-                    </label>
-                </div>
                 <div class="btn-group">
-                    <button class="btn btn-primary" id="save-llm">Save LLM Settings</button>
+                    <button class="btn btn-primary" id="save-llm">Save Generation Settings</button>
                 </div>
             </div>
         </div>
@@ -713,7 +787,7 @@
         <div class="content-section" id="sec-tools">
             <div class="section-header">
                 <h2>Tools</h2>
-                <p>Enable or disable tools, edit their descriptions, or run them directly from here.</p>
+                <p>Enable or disable tools and edit what the fish is told about each one: its description, when to use it, and example requests. Only enabled tools whose hardware is running are shown to the fish, examples included. Edits are saved to <code>config/tool_overrides.json</code>.</p>
             </div>
             <div class="btn-group" style="margin-bottom: 16px;">
                 <button class="btn btn-secondary btn-sm" id="btn-refresh-tools">↻ Refresh</button>
@@ -727,40 +801,93 @@
         <div class="content-section" id="sec-memory">
             <div class="section-header">
                 <h2>Memory &amp; Context</h2>
-                <p>Inspect and edit the fish's persistent memory and conversation history.</p>
+                <p>Everything the fish knows: long-term memory it was asked to keep, and the recent conversation it recalls.</p>
             </div>
 
-            <!-- Memory JSON viewer -->
+            <!-- Long-term memory -->
             <div class="card">
-                <div class="card-title"><span class="card-icon">💾</span> Stored Memory</div>
-                <div class="btn-group" style="margin-bottom: 12px;">
+                <div class="card-title"><span class="card-icon">💾</span> Long-Term Memory</div>
+                <p class="hint">Shown to the fish in full on every turn. Facts are saved when you ask it to remember something ("remember that…", "add to your memory…"), and you can add or fix them here. Labels are internal ids the fish uses to update or forget a fact.</p>
+                <div class="form-group">
+                    <label for="mem_user_name">Your Name</label>
+                    <div class="inline-form">
+                        <input type="text" id="mem_user_name" placeholder="Unknown — the fish will ask or learn it">
+                        <button class="btn btn-secondary btn-sm" id="btn-mem-save-name">Save Name</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mem_notes">Standing Notes</label>
+                    <textarea id="mem_notes" rows="4" placeholder="Background the fish should always know, e.g. &quot;You're mounted in Caleb's apartment in Oxford, Ohio. Ethan and Evan are Caleb's friends.&quot;"></textarea>
+                    <div class="btn-group" style="margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" id="btn-mem-save-notes">Save Notes</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Facts</label>
+                    <div class="item-list" id="mem-facts"><p class="item-empty">Loading…</p></div>
+                    <div class="btn-group" style="margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" id="btn-mem-add-fact">+ Add Fact</button>
+                        <button class="btn btn-danger btn-sm" id="btn-clear-facts">Clear All Facts</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Response Preferences</label>
+                    <div class="item-list" id="mem-prefs"></div>
+                    <div class="btn-group" style="margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" id="btn-mem-add-pref">+ Add Preference</button>
+                    </div>
+                </div>
+                <details class="raw-json">
+                    <summary>Raw memory file</summary>
+                    <pre id="memory-json">Loading…</pre>
+                </details>
+                <div class="btn-group">
                     <button class="btn btn-secondary btn-sm" id="btn-refresh-memory">↻ Refresh</button>
-                    <button class="btn btn-danger btn-sm" id="btn-clear-facts">Clear Facts</button>
                 </div>
-                <pre id="memory-json" style="
-                    background: var(--bg-input, #1e1e2e);
-                    color: var(--text-primary, #cdd6f4);
-                    padding: 14px;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    line-height: 1.6;
-                    overflow-x: auto;
-                    max-height: 380px;
-                    overflow-y: auto;
-                    border: 1px solid var(--border, rgba(255,255,255,0.08));
-                    white-space: pre-wrap;
-                    word-break: break-all;
-                ">Loading…</pre>
             </div>
 
-            <!-- Conversation history -->
+            <!-- Conversation memory -->
             <div class="card">
-                <div class="card-title"><span class="card-icon">📜</span> Conversation History</div>
-                <div class="btn-group" style="margin-bottom: 12px;">
-                    <button class="btn btn-secondary btn-sm" id="btn-refresh-history">↻ Refresh</button>
-                    <button class="btn btn-danger btn-sm" id="btn-clear-history">Clear History</button>
+                <div class="card-title"><span class="card-icon">📜</span> Conversation Memory</div>
+                <p class="hint">Every exchange is saved to <code>data/conversation_log.jsonl</code>. The fish recalls the ones inside the window below (highlighted), across restarts. To keep a conversation for good, say "remember this conversation" or use <strong>Save to Long-Term Memory</strong>: it's summarised into facts. <strong>Start Fresh</strong> makes the fish forget the conversation so far but keeps the log; delete a single exchange if it was misheard.</p>
+                <div class="kv-grid" style="margin-bottom:16px;">
+                    <div class="kv-item"><span class="kv-label">Recalled now</span><span class="kv-value" id="conv-recalled">—</span></div>
                 </div>
-                <div id="history-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto;"></div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="asst_recall_hours">Recall Window (hours, 0 = no limit)</label>
+                        <input type="number" id="asst_recall_hours" min="0" step="0.5">
+                    </div>
+                    <div class="form-group">
+                        <label for="asst_max_recall_turns">Max Recalled Exchanges (0 = no cap)</label>
+                        <input type="number" id="asst_max_recall_turns" min="0" step="1">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="asst_require_explicit_memory_intent">
+                        Only save new memories when asked ("remember", "save", "call me"…). Corrections to existing facts are always allowed.
+                    </label>
+                </div>
+                <div class="btn-group" style="margin-bottom: 14px;">
+                    <button class="btn btn-primary btn-sm" id="btn-save-memory-settings">Save Settings</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-refresh-history">↻ Refresh</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-remember-conversation" title="Summarise the recalled conversation into long-term memory, like saying &quot;remember this conversation&quot;">Save to Long-Term Memory</button>
+                    <button class="btn btn-secondary btn-sm" id="btn-start-fresh">Start Fresh</button>
+                    <button class="btn btn-danger btn-sm" id="btn-clear-history">Delete Entire Log</button>
+                </div>
+                <div id="history-list" class="turn-list"></div>
+            </div>
+
+            <!-- Context preview -->
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🔍</span> What the Fish Sees</div>
+                <p class="hint">The exact messages sent to the model for your next message: personality, rules, available tools with examples, long-term memory, then the recalled conversation and the current time.</p>
+                <div class="btn-group" style="margin-bottom: 12px;">
+                    <button class="btn btn-secondary btn-sm" id="btn-context-preview">Show Context</button>
+                    <span class="hint" id="context-stats" style="margin:0;align-self:center;"></span>
+                </div>
+                <div id="context-preview"></div>
             </div>
         </div>
 
@@ -768,7 +895,7 @@
         <div class="content-section" id="sec-personality">
             <div class="section-header">
                 <h2>Personality</h2>
-                <p>Edit the system prompt that defines Fishseus's character and behavior.</p>
+                <p>Edit what the fish is told: its character and voice, the response rules, and the lines it falls back on. Changes apply on the next message, no restart needed.</p>
             </div>
             <div class="card">
                 <div class="form-row">
@@ -786,13 +913,19 @@
                 </div>
             </div>
             <div class="card">
-                <div class="card-title"><span class="card-icon">📜</span> System Prompt</div>
+                <div class="card-title"><span class="card-icon">📜</span> Character &amp; Voice</div>
+                <p class="hint">Who the fish is and how it talks (<code>config/personality_prompt.txt</code>). The reply format, tool and memory rules are below, so editing this can't break them.</p>
                 <div class="form-group">
                     <textarea id="personality_text" rows="14" style="min-height: 240px;"></textarea>
                 </div>
                 <div class="btn-group">
                     <button class="btn btn-primary" id="save-personality">Save Personality Prompt</button>
                 </div>
+            </div>
+            <div class="card">
+                <div class="card-title"><span class="card-icon">🧩</span> Rules &amp; Other Prompt Text</div>
+                <p class="hint">Everything else the fish is told. Customised text is saved to <code>config/prompt_texts.json</code>; Reset restores the built-in default. Guidance and examples for each tool live on the Tools page.</p>
+                <div id="prompt-texts"><p class="item-empty">Loading…</p></div>
             </div>
         </div>
 
@@ -809,6 +942,7 @@
                     <div class="kv-item"><span class="kv-label">Fish voice device</span><span class="kv-value" id="out-device">—</span></div>
                     <div class="kv-item"><span class="kv-label">Shared mixer (fishout)</span><span class="kv-value" id="out-mixer">—</span></div>
                     <div class="kv-item"><span class="kv-label">Music while talking</span><span class="kv-value" id="out-mode">—</span></div>
+                    <div class="kv-item"><span class="kv-label">raspotify output</span><span class="kv-value" id="out-raspotify">—</span></div>
                     <div class="kv-item"><span class="kv-label">Spotify / Bluetooth</span><span class="kv-value" id="out-services">—</span></div>
                 </div>
                 <div class="notice" id="out-notice" style="display:none;"></div>
@@ -1235,11 +1369,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // LLM
             const l = c.llm || {};
-            setVal('llm_endpoint_url', l.endpoint_url);
-            setVal('llm_model', l.model);
             setVal('llm_temperature', l.temperature);
             setVal('llm_max_tokens', l.max_tokens);
-            setVal('llm_disable_reasoning', l.disable_reasoning);
 
             // TTS
             const t = c.tts || {};
@@ -1274,7 +1405,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Assistant names
             const as = c.assistant || {};
             setVal('assistant_name', as.assistant_name || 'Fishseus');
-            setVal('user_name', as.user_name || 'User');
+            // Long-term memory owns the name (loadPersonality); config only seeds it.
+            if (!getVal('user_name') && as.user_name && as.user_name !== 'User') setVal('user_name', as.user_name);
 
             // Vision
             const v = c.vision || {};
@@ -1317,6 +1449,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = await api('GET', '/api/personality');
             setVal('personality_text', data.text || '');
+            const mem = await api('GET', '/api/memory');
+            if (mem.profile && mem.profile.user_name) setVal('user_name', mem.profile.user_name);
         } catch (e) {
             // Not critical
         }
@@ -1357,17 +1491,6 @@ document.addEventListener('DOMContentLoaded', () => {
             model_path: getVal('stt_model_path'),
             threads: getVal('stt_threads', 'int'),
             wake_words: raw.split(',').map(s => s.trim()).filter(Boolean),
-        });
-    });
-
-    // LLM
-    document.getElementById('save-llm').addEventListener('click', () => {
-        saveSection('llm', {
-            endpoint_url: getVal('llm_endpoint_url'),
-            model: getVal('llm_model'),
-            temperature: getVal('llm_temperature', 'float'),
-            max_tokens: getVal('llm_max_tokens', 'int'),
-            disable_reasoning: getVal('llm_disable_reasoning'),
         });
     });
 
@@ -1678,6 +1801,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '<div class="chat-bubble ' + (msg.isUser ? 'user' : 'fish') + (msg.thinking ? ' thinking' : '') + '">' +
                 '<div class="bubble-label">' + (msg.isUser ? 'You' : '🐟 Fishseus') + '</div>' +
                 esc(msg.text) +
+                (msg.meta ? '<div class="bubble-meta">' + esc(msg.meta) + '</div>' : '') +
             '</div>'
         ).join('');
         chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -1698,10 +1822,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await api('POST', '/api/talk', { message: text });
             // Remove thinking indicator
             chatHistory.pop();
-            if (data.reply) {
-                chatHistory.push({ text: data.reply, isUser: false });
-            } else if (data.error) {
+            const meta = [];
+            if (data.tools && data.tools.length) meta.push('used: ' + data.tools.join(', '));
+            if (data.memory_updates && data.memory_updates.length) {
+                meta.push('remembered: ' + data.memory_updates.map(u => u.key).join(', '));
+            }
+            if (data.error) {
                 chatHistory.push({ text: 'Error: ' + data.error, isUser: false });
+            } else if (data.reply) {
+                chatHistory.push({ text: data.reply, isUser: false, meta: meta.join(' · ') });
+            } else if (meta.length) {
+                chatHistory.push({ text: '(acted silently)', isUser: false, meta: meta.join(' · ') });
             } else {
                 chatHistory.push({ text: 'No response.', isUser: false });
             }
@@ -2095,6 +2226,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================================================================
 
     let toolsData = [];
+    const openTools = new Set();   // tool cards left expanded across re-renders
+
+    // esc() leaves quotes alone; attribute values need them escaped too.
+    function escAttr(s) {
+        return esc(s == null ? '' : String(s)).replace(/"/g, '&quot;');
+    }
+
+    function fmtTs(ts) {
+        return ts ? new Date(ts * 1000).toLocaleString() : '';
+    }
 
     async function loadTools() {
         try {
@@ -2103,51 +2244,90 @@ document.addEventListener('DOMContentLoaded', () => {
             renderTools();
         } catch (e) {
             document.getElementById('tools-list').innerHTML =
-                '<p style="color:var(--text-secondary);font-size:13px;">Tools unavailable — registry not injected yet. Start the orchestrator first.</p>';
+                '<p class="item-empty">Tools unavailable — the assistant isn\'t running.</p>';
         }
+    }
+
+    function exampleRow(ex = {}) {
+        const args = ex.args && Object.keys(ex.args).length ? JSON.stringify(ex.args) : '';
+        return `<div class="edit-row example-row" data-motion="${escAttr(ex.motion || '')}">
+                <input type="text" class="ex-user" placeholder="What the user says" value="${escAttr(ex.user || '')}">
+                <input type="text" class="ex-args key-input" placeholder='Args JSON, e.g. {"cycles": 2}' value="${escAttr(args)}">
+                <input type="text" class="ex-speak" placeholder="Says first (optional)" value="${escAttr(ex.speak || '')}">
+                <button class="btn btn-danger btn-sm ex-remove" title="Remove example">✕</button>
+            </div>`;
+    }
+
+    function collectExamples(i) {
+        return [...document.querySelectorAll(`#tool-examples-${i} .example-row`)].map(row => {
+            const ex = {
+                user: row.querySelector('.ex-user').value.trim(),
+                args: row.querySelector('.ex-args').value.trim(),
+                speak: row.querySelector('.ex-speak').value.trim(),
+            };
+            if (row.dataset.motion) ex.motion = row.dataset.motion;
+            return ex;
+        }).filter(ex => ex.user || ex.args || ex.speak);
     }
 
     function renderTools() {
         const container = document.getElementById('tools-list');
         if (!toolsData.length) {
-            container.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">No tools registered.</p>';
+            container.innerHTML = '<p class="item-empty">No tools registered.</p>';
             return;
         }
 
-        container.innerHTML = toolsData.map((t, i) => `
+        container.innerHTML = toolsData.map((t, i) => {
+            const examples = t.examples || [];
+            const open = openTools.has(t.name);
+            return `
             <div class="card" style="margin-bottom:12px;" id="tool-card-${i}">
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                     <label class="toggle-label" title="${t.enabled ? 'Enabled' : 'Disabled'}">
-                        <input type="checkbox" class="tool-toggle" data-name="${esc(t.name)}" ${t.enabled ? 'checked' : ''}>
+                        <input type="checkbox" class="tool-toggle" data-name="${escAttr(t.name)}" ${t.enabled ? 'checked' : ''}>
                         <span class="toggle-track"></span>
                     </label>
                     <strong style="font-size:14px;min-width:130px;">${esc(t.name)}</strong>
                     <span style="font-size:11px;color:var(--text-secondary);flex:1;min-width:180px;">${esc(t.description)}</span>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.returns_data ? 'rgba(34,197,94,.15)' : 'rgba(156,163,175,.12)'};color:${t.returns_data ? '#86efac' : 'var(--text-secondary)'};">data</span>
-                        <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${t.synthesize_result ? 'rgba(139,92,246,.15)' : 'rgba(156,163,175,.12)'};color:${t.synthesize_result ? '#c4b5fd' : 'var(--text-secondary)'};">synth</span>
+                        ${t.available ? '' : `<span title="The hardware or service behind this tool isn't running, so the fish can't see it.">${pill('offline', 'warn')}</span>`}
+                        ${t.customized ? pill('customised', 'ok') : ''}
+                        ${pill(examples.length + (examples.length === 1 ? ' example' : ' examples'))}
+                        ${t.returns_data ? pill('data') : ''}
+                        ${t.synthesize_result ? pill('synth') : ''}
                     </div>
-                    <button class="btn btn-secondary btn-sm tool-expand-btn" data-idx="${i}">⚙</button>
+                    <button class="btn btn-secondary btn-sm tool-expand-btn" data-idx="${i}" data-name="${escAttr(t.name)}">⚙</button>
                 </div>
-                <div id="tool-detail-${i}" style="display:none;margin-top:14px;border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:14px;">
+                <div id="tool-detail-${i}" class="tool-detail" style="display:${open ? 'block' : 'none'};">
                     <div class="form-group">
-                        <label>Description</label>
-                        <input type="text" id="tool-desc-${i}" value="${esc(t.description)}" style="font-size:13px;">
+                        <label for="tool-desc-${i}">Description (What It Does &amp; Its Args)</label>
+                        <input type="text" id="tool-desc-${i}" value="${escAttr(t.description)}">
                     </div>
-                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <div class="form-group">
+                        <label for="tool-hint-${i}">When to Use It</label>
+                        <textarea id="tool-hint-${i}" rows="2" style="min-height:60px;" placeholder="Optional guidance, e.g. &quot;Any arithmetic. Never do the math in your head.&quot;">${esc(t.hint || '')}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Examples Shown to the Fish</label>
+                        <p class="hint" style="margin-bottom:8px;">Each becomes <code>User: "…"</code> followed by the exact JSON reply calling this tool. Only shown while the tool is enabled and online.</p>
+                        <div class="item-list" id="tool-examples-${i}">${examples.map(exampleRow).join('')}</div>
+                        <button class="btn btn-secondary btn-sm tool-add-example" data-idx="${i}" style="margin-top:8px;">+ Add Example</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
                             <input type="checkbox" id="tool-synth-${i}" ${t.synthesize_result ? 'checked' : ''}>
-                            Feed result back to LLM (synthesize_result)
+                            Always have the fish reword the result (otherwise short results may be read out as-is)
                         </label>
                     </div>
                     <div class="btn-group">
-                        <button class="btn btn-primary btn-sm tool-save-btn" data-idx="${i}" data-name="${esc(t.name)}">Save</button>
-                        <button class="btn btn-secondary btn-sm tool-run-btn" data-idx="${i}" data-name="${esc(t.name)}">▶ Run</button>
+                        <button class="btn btn-primary btn-sm tool-save-btn" data-idx="${i}" data-name="${escAttr(t.name)}">Save</button>
+                        <button class="btn btn-secondary btn-sm tool-run-btn" data-idx="${i}" data-name="${escAttr(t.name)}">▶ Run</button>
+                        ${t.customized ? `<button class="btn btn-secondary btn-sm tool-reset-btn" data-name="${escAttr(t.name)}">Reset to Default</button>` : ''}
                     </div>
                     <div id="tool-run-result-${i}" style="margin-top:10px;font-size:12px;color:var(--text-secondary);display:none;"></div>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
 
         // Toggle enable/disable
         container.querySelectorAll('.tool-toggle').forEach(chk => {
@@ -2167,25 +2347,53 @@ document.addEventListener('DOMContentLoaded', () => {
         // Expand/collapse gear button
         container.querySelectorAll('.tool-expand-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const i = btn.dataset.idx;
-                const detail = document.getElementById('tool-detail-' + i);
-                detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+                const detail = document.getElementById('tool-detail-' + btn.dataset.idx);
+                const show = detail.style.display === 'none';
+                detail.style.display = show ? 'block' : 'none';
+                if (show) openTools.add(btn.dataset.name); else openTools.delete(btn.dataset.name);
             });
         });
 
-        // Save description/synthesize edits
+        container.querySelectorAll('.tool-add-example').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const list = document.getElementById('tool-examples-' + btn.dataset.idx);
+                list.insertAdjacentHTML('beforeend', exampleRow());
+                list.lastElementChild.querySelector('.ex-user').focus();
+            });
+        });
+
+        // Save description / hint / examples / synthesize flag
         container.querySelectorAll('.tool-save-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const i = btn.dataset.idx;
                 const name = btn.dataset.name;
-                const desc = document.getElementById('tool-desc-' + i).value.trim();
-                const synth = document.getElementById('tool-synth-' + i).checked;
+                const body = {
+                    description: document.getElementById('tool-desc-' + i).value.trim(),
+                    hint: document.getElementById('tool-hint-' + i).value.trim(),
+                    examples: collectExamples(i),
+                    synthesize_result: document.getElementById('tool-synth-' + i).checked,
+                };
                 try {
-                    const resp = await api('PATCH', `/api/tools/${encodeURIComponent(name)}`, { description: desc, synthesize_result: synth });
-                    showToast(resp.status || resp.error || 'Saved');
+                    const resp = await api('PATCH', `/api/tools/${encodeURIComponent(name)}`, body);
+                    if (resp.error) { showToast(resp.error, 'error'); return; }
+                    showToast(`${name} saved`);
                     await loadTools();
                 } catch (e) {
                     showToast('Failed to save tool edit', 'error');
+                }
+            });
+        });
+
+        container.querySelectorAll('.tool-reset-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const name = btn.dataset.name;
+                if (!confirm(`Reset ${name} to its built-in description, hint and examples?`)) return;
+                try {
+                    const resp = await api('POST', `/api/tools/${encodeURIComponent(name)}/reset`);
+                    showToast(resp.status || resp.error, resp.error ? 'error' : 'success');
+                    await loadTools();
+                } catch (e) {
+                    showToast('Failed to reset tool', 'error');
                 }
             });
         });
@@ -2210,6 +2418,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    document.getElementById('tools-list').addEventListener('click', (e) => {
+        const remove = e.target.closest('.ex-remove');
+        if (remove) remove.closest('.example-row').remove();
+    });
+
     document.getElementById('btn-refresh-tools').addEventListener('click', loadTools);
 
     // =====================================================================
@@ -2218,61 +2431,228 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadMemory() {
         const pre = document.getElementById('memory-json');
+        let data;
         try {
-            const data = await api('GET', '/api/memory');
-            pre.textContent = JSON.stringify(data, null, 2);
+            data = await api('GET', '/api/memory');
         } catch (e) {
             pre.textContent = 'Memory unavailable.';
+            return;
         }
+        pre.textContent = JSON.stringify(data, null, 2);
+        if (data.error) return;
+        setVal('mem_user_name', (data.profile || {}).user_name || '');
+        setVal('mem_notes', data.notes || '');
+        renderFacts(data.facts || []);
+        renderPrefs(data.preferences || {});
+    }
+
+    function factRow(f = {}) {
+        return `<div class="edit-row fact-row" data-key="${escAttr(f.key || '')}">
+                <input type="text" class="key-input fact-key" placeholder="label (optional)" value="${escAttr(f.key || '')}">
+                <input type="text" class="fact-value" placeholder="One full sentence, e.g. Ethan lives at 5450 Lockwood Road, Madison, Ohio." value="${escAttr(f.value || '')}">
+                <button class="btn btn-primary btn-sm fact-save">Save</button>
+                <button class="btn btn-danger btn-sm fact-delete">${f.key ? 'Delete' : 'Cancel'}</button>
+                ${f.updated_at ? `<div class="row-meta">updated ${esc(fmtTs(f.updated_at))}</div>` : ''}
+            </div>`;
+    }
+
+    function renderFacts(facts) {
+        document.getElementById('mem-facts').innerHTML = facts.length
+            ? facts.map(factRow).join('')
+            : '<p class="item-empty">No facts yet. Ask the fish to remember something, or add one here.</p>';
+    }
+
+    function prefRow(key = '', value = '') {
+        return `<div class="edit-row pref-row" data-key="${escAttr(key)}">
+                <input type="text" class="key-input pref-key" placeholder="e.g. response_style" value="${escAttr(key)}">
+                <input type="text" class="pref-value" placeholder="e.g. short answers, skip the theatrics in the morning" value="${escAttr(value)}">
+                <button class="btn btn-primary btn-sm pref-save">Save</button>
+                <button class="btn btn-danger btn-sm pref-delete">${key ? 'Delete' : 'Cancel'}</button>
+            </div>`;
+    }
+
+    function renderPrefs(prefs) {
+        const keys = Object.keys(prefs);
+        document.getElementById('mem-prefs').innerHTML = keys.length
+            ? keys.map(k => prefRow(k, prefs[k])).join('')
+            : '<p class="item-empty">None set. Tell the fish how to respond ("I prefer short answers") or add one here.</p>';
+    }
+
+    function prependRow(listId, html) {
+        const list = document.getElementById(listId);
+        const empty = list.querySelector('.item-empty');
+        if (empty) empty.remove();
+        list.insertAdjacentHTML('afterbegin', html);
+        list.firstElementChild.querySelector('input:not(.key-input)').focus();
+    }
+
+    async function memoryCall(method, path, body, okMsg) {
+        try {
+            const resp = await api(method, path, body);
+            if (resp.error) { showToast(resp.error, 'error'); return false; }
+            showToast(okMsg || resp.status || 'Saved');
+            await loadMemory();
+            return true;
+        } catch (e) {
+            showToast('Memory update failed', 'error');
+            return false;
+        }
+    }
+
+    document.getElementById('btn-mem-add-fact').addEventListener('click', () => prependRow('mem-facts', factRow()));
+    document.getElementById('btn-mem-add-pref').addEventListener('click', () => prependRow('mem-prefs', prefRow()));
+
+    document.getElementById('mem-facts').addEventListener('click', async (e) => {
+        const row = e.target.closest('.fact-row');
+        if (!row) return;
+        const original = row.dataset.key;
+        if (e.target.closest('.fact-save')) {
+            await memoryCall('POST', '/api/memory/facts', {
+                key: row.querySelector('.fact-key').value.trim(),
+                value: row.querySelector('.fact-value').value.trim(),
+                original_key: original,
+            });
+        } else if (e.target.closest('.fact-delete')) {
+            if (!original) { row.remove(); return; }
+            if (!confirm(`Forget "${row.querySelector('.fact-value').value}"?`)) return;
+            await memoryCall('DELETE', `/api/memory/facts/${encodeURIComponent(original)}`, undefined, 'Fact deleted');
+        }
+    });
+
+    document.getElementById('mem-prefs').addEventListener('click', async (e) => {
+        const row = e.target.closest('.pref-row');
+        if (!row) return;
+        const original = row.dataset.key;
+        if (e.target.closest('.pref-save')) {
+            await memoryCall('POST', '/api/memory/preferences', {
+                key: row.querySelector('.pref-key').value.trim(),
+                value: row.querySelector('.pref-value').value.trim(),
+                original_key: original,
+            });
+        } else if (e.target.closest('.pref-delete')) {
+            if (!original) { row.remove(); return; }
+            await memoryCall('POST', '/api/memory/preferences', { key: original, value: '' }, 'Preference removed');
+        }
+    });
+
+    document.getElementById('btn-mem-save-name').addEventListener('click', () =>
+        memoryCall('POST', '/api/memory/profile', { user_name: getVal('mem_user_name').trim() }, 'Name saved'));
+    document.getElementById('btn-mem-save-notes').addEventListener('click', () =>
+        memoryCall('POST', '/api/memory/notes', { text: getVal('mem_notes') }, 'Notes saved'));
+
+    document.getElementById('btn-clear-facts').addEventListener('click', async () => {
+        if (!confirm('Clear all stored facts? This cannot be undone.')) return;
+        await memoryCall('DELETE', '/api/memory/facts', undefined, 'Facts cleared');
+    });
+
+    function renderTurn(t) {
+        if (t.event === 'clear') {
+            return `<div class="turn-divider">— started fresh · ${esc(fmtTs(t.timestamp))} —</div>`;
+        }
+        const tools = (t.tool_calls || []).map(c =>
+            c.name + (c.args && Object.keys(c.args).length ? ' ' + JSON.stringify(c.args) : ''));
+        const results = (t.tool_results || []).map(r =>
+            r.ok ? `${r.tool} → ${String(r.result ?? '')}` : `${r.tool} failed: ${r.error || ''}`);
+        const mem = (t.memory_updates || []).map(u => `${u.key} = ${u.value}`);
+        const who = t.source === 'sensor' ? 'Sensor' : 'You';
+        return `<div class="turn ${t.recalled ? 'recalled' : ''}">
+                <div class="turn-head">
+                    <span>${esc(fmtTs(t.timestamp))}</span>
+                    ${t.source ? pill(t.source) : ''}
+                    ${t.recalled ? pill('recalled', 'ok') : ''}
+                    ${t.id ? `<button class="btn btn-danger btn-sm turn-delete" data-id="${escAttr(t.id)}" title="Delete this exchange">✕</button>` : ''}
+                </div>
+                <div class="turn-user"><strong>${who}:</strong> ${esc(t.user || '')}</div>
+                <div class="turn-fish"><strong>Fish:</strong> ${t.assistant ? esc(t.assistant) : '<em>(silent)</em>'}</div>
+                ${tools.length ? `<div class="turn-extra">tools: ${esc(tools.join(', '))}</div>` : ''}
+                ${results.length ? `<div class="turn-extra">results: ${esc(results.join(' | '))}</div>` : ''}
+                ${mem.length ? `<div class="turn-extra">remembered: ${esc(mem.join(' | '))}</div>` : ''}
+            </div>`;
     }
 
     async function loadHistory() {
         const list = document.getElementById('history-list');
+        let data;
         try {
-            const data = await api('GET', '/api/memory/history?n=30');
-            const turns = data.turns || [];
-            if (!turns.length) {
-                list.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">No conversation history yet.</p>';
-                return;
-            }
-            list.innerHTML = turns.reverse().map(t => `
-                <div style="
-                    background: var(--bg-input, #1e1e2e);
-                    border: 1px solid var(--border, rgba(255,255,255,.08));
-                    border-radius: 8px;
-                    padding: 12px 14px;
-                    font-size: 12px;
-                    line-height: 1.6;
-                ">
-                    <div style="color:var(--text-secondary);margin-bottom:4px;font-size:11px;">
-                        ${new Date((t.timestamp || 0) * 1000).toLocaleString()} &nbsp;·&nbsp; ${(t.elapsed_s || 0).toFixed(2)}s
-                        ${t.tool_calls && t.tool_calls.length ? ' &nbsp;·&nbsp; tools: ' + t.tool_calls.map(c => esc(c.name)).join(', ') : ''}
-                    </div>
-                    <div style="color:#86efac;margin-bottom:4px;"><strong>You:</strong> ${esc(t.user || '')}</div>
-                    <div style="color:#c4b5fd;"><strong>Fish:</strong> ${esc(t.assistant || '')}</div>
-                </div>
-            `).join('');
+            data = await api('GET', '/api/memory/history?n=60');
         } catch (e) {
-            list.innerHTML = '<p style="color:var(--text-secondary);font-size:13px;">History unavailable.</p>';
+            list.innerHTML = '<p class="item-empty">History unavailable.</p>';
+            return;
         }
+        if (data.recall_hours !== undefined) {
+            setVal('asst_recall_hours', data.recall_hours);
+            setVal('asst_max_recall_turns', data.max_recall_turns);
+            setVal('asst_require_explicit_memory_intent', data.require_explicit_memory_intent);
+            const span = data.recall_hours > 0 ? `from the last ${data.recall_hours} h` : 'with no time limit';
+            document.getElementById('conv-recalled').textContent =
+                `${data.recalled_count} exchange${data.recalled_count === 1 ? '' : 's'} ${span}`;
+        }
+        const turns = (data.turns || []).slice().reverse();
+        list.innerHTML = turns.length
+            ? turns.map(renderTurn).join('')
+            : '<p class="item-empty">No conversation yet.</p>';
     }
+
+    document.getElementById('history-list').addEventListener('click', async (e) => {
+        const btn = e.target.closest('.turn-delete');
+        if (!btn) return;
+        if (!confirm("Delete this exchange from the log and from the fish's recall?")) return;
+        try {
+            const resp = await api('DELETE', `/api/memory/history/${encodeURIComponent(btn.dataset.id)}`);
+            showToast(resp.status || resp.error, resp.error ? 'error' : 'success');
+            await loadHistory();
+        } catch (err) {
+            showToast('Failed to delete exchange', 'error');
+        }
+    });
 
     document.getElementById('btn-refresh-memory').addEventListener('click', loadMemory);
     document.getElementById('btn-refresh-history').addEventListener('click', loadHistory);
 
-    document.getElementById('btn-clear-facts').addEventListener('click', async () => {
-        if (!confirm('Clear all stored facts? This cannot be undone.')) return;
+    document.getElementById('btn-save-memory-settings').addEventListener('click', async () => {
+        const hours = getVal('asst_recall_hours', 'float');
+        const turns = getVal('asst_max_recall_turns', 'int');
+        if (!(hours >= 0) || !(turns >= 0)) {
+            showToast('Recall window and max exchanges must be 0 or more', 'error');
+            return;
+        }
+        await saveSection('assistant', {
+            recall_hours: hours,
+            max_recall_turns: turns,
+            require_explicit_memory_intent: getVal('asst_require_explicit_memory_intent'),
+        });
+        await loadHistory();
+    });
+
+    document.getElementById('btn-remember-conversation').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'Summarising…';
         try {
-            const resp = await api('DELETE', '/api/memory/facts');
-            showToast(resp.status || resp.error || 'Facts cleared');
-            await loadMemory();
+            const resp = await api('POST', '/api/memory/history/remember', {});
+            showToast(resp.error || 'Conversation saved to long-term memory', resp.error ? 'error' : 'success');
+            if (!resp.error) await loadMemory();
+        } catch (err) {
+            showToast('Failed to save the conversation', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save to Long-Term Memory';
+        }
+    });
+
+    document.getElementById('btn-start-fresh').addEventListener('click', async () => {
+        if (!confirm('Start fresh? The fish forgets the conversation so far (long-term memory and the log are kept).')) return;
+        try {
+            const resp = await api('POST', '/api/memory/history/fresh');
+            showToast(resp.status || resp.error, resp.error ? 'error' : 'success');
+            await loadHistory();
         } catch (e) {
-            showToast('Failed to clear facts', 'error');
+            showToast('Failed to start fresh', 'error');
         }
     });
 
     document.getElementById('btn-clear-history').addEventListener('click', async () => {
-        if (!confirm('Clear conversation history? This cannot be undone.')) return;
+        if (!confirm('Delete the entire conversation log? This cannot be undone.')) return;
         try {
             const resp = await api('DELETE', '/api/memory/history');
             showToast(resp.status || resp.error || 'History cleared');
@@ -2282,12 +2662,91 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    document.getElementById('btn-context-preview').addEventListener('click', async () => {
+        const out = document.getElementById('context-preview');
+        out.innerHTML = '<p class="item-empty">Loading…</p>';
+        let data;
+        try {
+            data = await api('GET', '/api/assistant/context');
+        } catch (e) {
+            out.innerHTML = '<p class="item-empty">Context unavailable.</p>';
+            return;
+        }
+        if (data.error) {
+            out.innerHTML = `<p class="item-empty">${esc(data.error)}</p>`;
+            return;
+        }
+        document.getElementById('context-stats').textContent =
+            `${data.messages.length} messages · ${data.chars.toLocaleString()} characters ` +
+            `(~${Math.round(data.chars / 4).toLocaleString()} tokens) · ${data.recalled_turns} recalled exchanges`;
+        out.innerHTML = data.messages.map((m, i) => `
+            <details class="ctx-msg ${escAttr(m.role)}" open>
+                <summary class="ctx-role">${esc(m.role)}${i === 0 ? ' — personality, rules, tools, memory' : ''}
+                    · ${m.content.length.toLocaleString()} chars</summary>
+                <pre>${esc(m.content)}</pre>
+            </details>`).join('');
+    });
+
+    // =====================================================================
+    // Prompt text (Personality page)
+    // =====================================================================
+
+    async function loadPromptTexts() {
+        const el = document.getElementById('prompt-texts');
+        let data;
+        try {
+            data = await api('GET', '/api/prompts');
+        } catch (e) {
+            el.innerHTML = '<p class="item-empty">Prompt text unavailable.</p>';
+            return;
+        }
+        if (data.error) {
+            el.innerHTML = `<p class="item-empty">${esc(data.error)}</p>`;
+            return;
+        }
+        el.innerHTML = data.texts.map(t => `
+            <div class="form-group prompt-text" data-key="${escAttr(t.key)}">
+                <label>${esc(t.label)} ${t.customized ? pill('customised', 'ok') : pill('default')}</label>
+                <p class="hint" style="margin-bottom:8px;">${esc(t.help)}</p>
+                <textarea class="${t.text.length > 400 ? 'tall' : ''}" rows="${t.text.length > 160 ? 8 : 2}">${esc(t.text)}</textarea>
+                <div class="btn-group" style="margin-top:8px;">
+                    <button class="btn btn-primary btn-sm pt-save">Save</button>
+                    ${t.customized ? '<button class="btn btn-secondary btn-sm pt-reset">Reset to Default</button>' : ''}
+                </div>
+            </div>`).join('');
+    }
+
+    document.getElementById('prompt-texts').addEventListener('click', async (e) => {
+        const block = e.target.closest('.prompt-text');
+        if (!block) return;
+        const key = block.dataset.key;
+        let resp;
+        try {
+            if (e.target.closest('.pt-save')) {
+                resp = await api('POST', `/api/prompts/${encodeURIComponent(key)}`,
+                                 { text: block.querySelector('textarea').value });
+            } else if (e.target.closest('.pt-reset')) {
+                if (!confirm('Restore the built-in default text?')) return;
+                resp = await api('DELETE', `/api/prompts/${encodeURIComponent(key)}`);
+            } else {
+                return;
+            }
+        } catch (err) {
+            showToast('Failed to save prompt text', 'error');
+            return;
+        }
+        showToast(resp.error || (resp.status === 'saved' ? 'Prompt text saved' : 'Default restored'),
+                  resp.error ? 'error' : 'success');
+        await loadPromptTexts();
+    });
+
     // Load tools/memory when switching to those sections
     const _origSwitch2 = switchSection;
     switchSection = function(name) {
         _origSwitch2(name);
         if (name === 'tools') loadTools();
         if (name === 'memory') { loadMemory(); loadHistory(); }
+        if (name === 'personality') loadPromptTexts();
         // Probe hardware devices lazily, only when a section that uses them is
         // first opened (avoids the subprocess-heavy scan on dashboard load).
         if ((name === 'audio' || name === 'vision') && !devicesLoaded) loadDevices();
@@ -2375,6 +2834,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 o.mixer_installed ? pill('installed', 'ok') : pill('not found', 'bad');
             const modes = { volume: `Turn down to ${o.duck_percent}%`, pause: 'Pause, then resume', off: 'Leave alone' };
             document.getElementById('out-mode').textContent = modes[o.duck_mode] || o.duck_mode;
+            const rdev = o.raspotify_device;
+            document.getElementById('out-raspotify').innerHTML = rdev === null
+                ? pill('not installed')
+                : esc(rdev) + ' ' + (rdev === 'fishout' ? pill('shared', 'ok') : pill('exclusive', 'warn'));
             document.getElementById('out-services').innerHTML =
                 (o.spotify_running ? pill('Spotify', 'ok') : pill('Spotify off')) + ' ' +
                 (o.bluetooth_running ? pill('Bluetooth', 'ok') : pill('Bluetooth off'));
@@ -2388,6 +2851,15 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (o.audio_device === 'fishout' && !o.mixer_installed) {
                 notice = `<code>fishout</code> isn't defined on this machine, so the fish can't play audio. ` +
                          `Add it to <code>/etc/asound.conf</code> (see spotify/README.md).`;
+            } else if (o.duck_mode === 'volume' && rdev !== null && rdev !== 'fishout') {
+                notice = `raspotify is playing to <code>${esc(rdev)}</code>, not <code>fishout</code>, so it holds the sound card ` +
+                         `and the fish's voice fails with "Device or resource busy" while music plays. In ` +
+                         `<code>/etc/raspotify/conf</code> set <code>LIBRESPOT_DEVICE="fishout"</code>, then ` +
+                         `<code>sudo systemctl restart raspotify</code>.`;
+                if (o.raspotify_mixer_device === 'fishout') {
+                    notice += ` <code>LIBRESPOT_ALSA_MIXER_DEVICE</code> is also set to <code>fishout</code>. That setting is ` +
+                              `only for volume control and doesn't change where the music plays; comment it out.`;
+                }
             } else if (o.mixer_installed && o.device_shared) {
                 notice = 'The shared mixer is set up, so the fish and the music can play at the same time.';
                 kind = 'ok';
@@ -2727,6 +3199,258 @@ document.addEventListener('DOMContentLoaded', () => {
         if (name === 'spotify') startSpotifyPolling(); else stopSpotifyPolling();
         if (name === 'bluetooth') loadBluetooth();
         if (name === 'access_point') loadAccessPoint();
+    };
+
+    // =====================================================================
+    // Language Model providers
+    // =====================================================================
+    const LLM_PRESETS = {
+        xai:    { label: 'xAI Grok', api_type: 'openai', endpoint_url: 'https://api.x.ai/v1/chat/completions',
+                  model: 'grok-4.20-0309-non-reasoning', api_key_env: 'XAI_API_KEY' },
+        openai: { label: 'OpenAI', api_type: 'openai', endpoint_url: 'https://api.openai.com/v1/chat/completions',
+                  model: '', api_key_env: 'OPENAI_API_KEY' },
+        ollama: { label: 'Ollama', api_type: 'ollama', endpoint_url: 'http://localhost:11434/v1/chat/completions',
+                  model: 'qwen2.5:3b', disable_reasoning: true },
+        custom: { label: 'Custom', api_type: 'openai', endpoint_url: '', model: '' },
+    };
+    // Fields the server adds for display only; never saved back.
+    const LLM_DISPLAY_ONLY = ['has_key', 'key_hint'];
+
+    let llmProviders = {};
+    let llmActive = '';
+    let llmEditing = '';
+
+    function llmLabel(name) {
+        const p = llmProviders[name] || {};
+        return p.label ? `${p.label} (${name})` : name;
+    }
+
+    function fillProviderSelect(id, selected) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        Object.keys(llmProviders).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = llmLabel(name) + (name === llmActive ? ' ✓' : '');
+            sel.appendChild(opt);
+        });
+        if (selected && llmProviders[selected]) sel.value = selected;
+    }
+
+    async function loadLlmProviders(editName) {
+        let data;
+        try {
+            data = await api('GET', '/api/llm/providers');
+        } catch (e) {
+            showToast('Failed to load LLM providers', 'error');
+            return;
+        }
+        llmProviders = data.providers || {};
+        llmActive = data.provider || '';
+        llmEditing = (editName && llmProviders[editName]) ? editName
+                   : (llmProviders[llmEditing] ? llmEditing : llmActive);
+        fillProviderSelect('llm_active_provider', llmActive);
+        fillProviderSelect('llm_edit_provider', llmEditing);
+
+        const live = data.live;
+        document.getElementById('llm-live-provider').innerHTML = live
+            ? esc(llmLabel(live.provider) || '—') + ' ' + pill('live', 'ok')
+            : pill('not running', 'bad');
+        document.getElementById('llm-live-model').textContent = live ? live.model : '—';
+        document.getElementById('llm-live-endpoint').textContent = live ? live.endpoint : '—';
+        fillLlmEditor();
+    }
+
+    function fillLlmEditor() {
+        const p = llmProviders[llmEditing] || {};
+        setVal('llm_p_label', p.label || '');
+        setVal('llm_p_api_type', p.api_type || 'ollama');
+        setVal('llm_p_endpoint_url', p.endpoint_url || '');
+        setVal('llm_p_model', p.model || '');
+        setVal('llm_p_reasoning_effort', p.reasoning_effort || '');
+        setVal('llm_p_disable_reasoning', p.disable_reasoning ?? true);
+        document.getElementById('llm_p_api_key').value = '';
+        document.getElementById('llm-model-list').innerHTML = '';
+        document.getElementById('llm-key-status').innerHTML = p.has_key
+            ? pill('key set ' + (p.key_hint || ''), 'ok')
+            : (p.api_type === 'openai' ? pill('no key', 'warn') : '');
+        document.getElementById('btn-llm-remove').disabled = llmEditing === llmActive;
+        setNotice('llm-test-result', '');
+        updateLlmRows();
+    }
+
+    function updateLlmRows() {
+        const type = getVal('llm_p_api_type');
+        document.getElementById('llm-row-reasoning-effort').style.display = type === 'openai' ? '' : 'none';
+        document.getElementById('llm-row-disable-reasoning').style.display = type === 'ollama' ? '' : 'none';
+
+        // Reasoning models think before answering: slower, and the thinking counts
+        // against the assistant's small reply budget.
+        const model = (getVal('llm_p_model') || '').toLowerCase();
+        const effort = getVal('llm_p_reasoning_effort');
+        const reasoningGrok = /^grok-4\.[5-9]/.test(model) || (model.includes('reasoning') && !model.includes('non-reasoning'));
+        let notice = '';
+        if (type === 'openai' && reasoningGrok && !effort) {
+            notice = `<code>${esc(model)}</code> is a reasoning model: replies are slower and its thinking uses up the ` +
+                     `fish's short reply budget. For a voice assistant use <code>grok-4.20-0309-non-reasoning</code>, ` +
+                     `or set Reasoning Effort to <b>low</b>.`;
+        }
+        setNotice('llm-model-notice', notice);
+    }
+
+    function readLlmEditor() {
+        const type = getVal('llm_p_api_type');
+        const entry = {
+            label: getVal('llm_p_label').trim(),
+            api_type: type,
+            endpoint_url: getVal('llm_p_endpoint_url').trim(),
+            model: getVal('llm_p_model').trim(),
+        };
+        if (type === 'openai') {
+            const effort = getVal('llm_p_reasoning_effort');
+            entry.reasoning_effort = effort || null;
+        } else {
+            entry.disable_reasoning = getVal('llm_p_disable_reasoning');
+        }
+        return entry;
+    }
+
+    // The saved providers map, minus server-added display fields.
+    function providersForSave() {
+        const out = {};
+        Object.entries(llmProviders).forEach(([name, p]) => {
+            const copy = { ...p };
+            LLM_DISPLAY_ONLY.forEach(k => delete copy[k]);
+            if (copy.reasoning_effort === null) delete copy.reasoning_effort;
+            out[name] = copy;
+        });
+        return out;
+    }
+
+    async function saveLlmProviders(providers, extra = {}) {
+        const resp = await api('POST', '/api/llm', { providers, ...extra });
+        if (resp.error) {
+            showToast(resp.error, 'error');
+            return false;
+        }
+        return true;
+    }
+
+    document.getElementById('llm_p_api_type').addEventListener('change', updateLlmRows);
+    document.getElementById('llm_p_model').addEventListener('input', updateLlmRows);
+    document.getElementById('llm_p_reasoning_effort').addEventListener('change', updateLlmRows);
+    document.getElementById('llm_edit_provider').addEventListener('change', (e) => {
+        llmEditing = e.target.value;
+        fillLlmEditor();
+    });
+
+    document.getElementById('save-llm-provider').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        const providers = providersForSave();
+        providers[llmEditing] = { ...providers[llmEditing], ...readLlmEditor() };
+        if (providers[llmEditing].reasoning_effort === null) delete providers[llmEditing].reasoning_effort;
+        if (await saveLlmProviders(providers)) {
+            showToast(llmEditing === llmActive ? 'Provider saved and applied' : 'Provider saved');
+            await loadLlmProviders(llmEditing);
+        }
+        btn.disabled = false;
+    });
+
+    document.getElementById('btn-llm-activate').addEventListener('click', async (e) => {
+        const name = getVal('llm_active_provider');
+        const p = llmProviders[name] || {};
+        if (p.api_type === 'openai' && !p.has_key &&
+            !confirm(`${llmLabel(name)} has no API key saved. Switch anyway?`)) return;
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        if (await saveLlmProviders(providersForSave(), { provider: name })) {
+            showToast(`The fish now thinks with ${llmLabel(name)}`);
+            await loadLlmProviders(name);
+        }
+        btn.disabled = false;
+    });
+
+    document.getElementById('llm_add_preset').addEventListener('change', async (e) => {
+        const preset = e.target.value;
+        e.target.value = '';
+        if (!preset) return;
+        const name = (prompt('Short name for this provider (letters, numbers, dashes):', preset) || '').trim();
+        if (!name) return;
+        if (!/^[a-z0-9_-]+$/i.test(name)) { showToast('Use only letters, numbers, - and _', 'error'); return; }
+        if (llmProviders[name]) { showToast(`"${name}" already exists`, 'error'); return; }
+        const providers = providersForSave();
+        providers[name] = { ...LLM_PRESETS[preset] };
+        if (await saveLlmProviders(providers)) {
+            showToast(`Added ${name}. Fill in the model and API key, then Save Provider.`, 'info');
+            await loadLlmProviders(name);
+        }
+    });
+
+    document.getElementById('btn-llm-remove').addEventListener('click', async () => {
+        if (llmEditing === llmActive) return;
+        if (!confirm(`Remove ${llmLabel(llmEditing)} and its saved API key?`)) return;
+        await api('POST', '/api/llm/api_key', { provider: llmEditing, api_key: '' });
+        const providers = providersForSave();
+        delete providers[llmEditing];
+        if (await saveLlmProviders(providers)) {
+            showToast('Provider removed', 'info');
+            llmEditing = llmActive;
+            await loadLlmProviders(llmActive);
+        }
+    });
+
+    document.getElementById('btn-llm-save-key').addEventListener('click', async (e) => {
+        const key = document.getElementById('llm_p_api_key').value.trim();
+        if (!key) { showToast('Paste a key first', 'error'); return; }
+        await runAction(e.currentTarget, 'POST', '/api/llm/api_key', { provider: llmEditing, api_key: key });
+        await loadLlmProviders(llmEditing);
+    });
+    document.getElementById('btn-llm-clear-key').addEventListener('click', async (e) => {
+        if (!confirm(`Remove the saved API key for ${llmLabel(llmEditing)}?`)) return;
+        await runAction(e.currentTarget, 'POST', '/api/llm/api_key', { provider: llmEditing, api_key: '' });
+        await loadLlmProviders(llmEditing);
+    });
+
+    document.getElementById('btn-llm-models').addEventListener('click', async (e) => {
+        const resp = await runAction(e.currentTarget, 'POST', '/api/llm/models',
+                                     { provider: llmEditing, entry: readLlmEditor() });
+        const list = document.getElementById('llm-model-list');
+        list.innerHTML = '';
+        ((resp && resp.models) || []).forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            list.appendChild(opt);
+        });
+        if (resp && resp.models && resp.models.length) document.getElementById('llm_p_model').focus();
+    });
+
+    document.getElementById('btn-llm-test').addEventListener('click', async (e) => {
+        setNotice('llm-test-result', '');
+        const btn = e.currentTarget;
+        btn.textContent = '… Testing';
+        const resp = await runAction(btn, 'POST', '/api/llm/test',
+                                     { provider: llmEditing, entry: readLlmEditor() });
+        btn.textContent = '▶ Test';
+        if (resp && resp.reply !== undefined) {
+            setNotice('llm-test-result', `${esc(resp.status)}: “${esc(resp.reply)}”`, 'ok');
+        } else if (resp && resp.error) {
+            setNotice('llm-test-result', esc(resp.error));
+        }
+    });
+
+    // Generation settings shared by every provider.
+    document.getElementById('save-llm').addEventListener('click', () => {
+        saveSection('llm', {
+            temperature: getVal('llm_temperature', 'float'),
+            max_tokens: getVal('llm_max_tokens', 'int'),
+        });
+    });
+
+    const _origSwitch4 = switchSection;
+    switchSection = function(name) {
+        _origSwitch4(name);
+        if (name === 'llm') loadLlmProviders();
     };
 
     // Add inline toggle styles

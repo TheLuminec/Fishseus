@@ -4,9 +4,11 @@ llm_service.py
 Thin OpenAI-compatible LLM client service for Fishseus.
 
 Responsibilities:
-- Send chat/completions requests to an OpenAI-compatible endpoint (Ollama, etc.)
+- Send chat/completions requests to an OpenAI-compatible endpoint (Ollama,
+  xAI Grok, OpenAI, ...)
 - Handle timeouts, retries, and basic response parsing
-- Support plug-and-play model/server configuration
+- Resolve named providers from config (config_from_section) so the endpoint
+  can be switched without code changes
 
 Non-responsibilities:
 - No memory, personality, tool policy, or orchestration — those belong to
@@ -25,8 +27,17 @@ Example:
     print(result.content)
     llm.shutdown()
 
+Provider config ("llm" in fish_config.json):
+    {"provider": "xai", "temperature": 0.75,
+     "providers": {
+        "ollama": {"api_type": "ollama", "endpoint_url": "http://.../v1/chat/completions",
+                   "model": "qwen2.5:3b"},
+        "xai":    {"api_type": "openai", "endpoint_url": "https://api.x.ai/v1/chat/completions",
+                   "model": "grok-4.20-0309-non-reasoning"}}}
+    API keys live in config/secrets.json under "llm_api_keys": {"xai": "xai-..."}.
+
 Orchestrator usage:
-    llm = LlmService(LlmConfig(**config.get("llm", {})))
+    llm = LlmService(config_from_section(config.get("llm", {})))
     llm.initialize()                 # validates config (no network call)
     assistant = AssistantService(llm=llm, ...)
     ...
@@ -36,13 +47,24 @@ Orchestrator usage:
 from __future__ import annotations
 
 import json
+import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Optional
 
 import requests
 
-from services import Service, ServiceConfig, ServiceError
+from services import Service, ServiceConfig, ServiceError, load_secrets
+
+# api_type values:
+#   "ollama" - Ollama's OpenAI-compatible endpoint; also sends Ollama's thinking
+#              switches (think / reasoning_effort "none") when disable_reasoning.
+#   "openai" - strict OpenAI-style params only (xAI, OpenAI, LM Studio, ...).
+#              Strict servers reject Ollama's extras, e.g. xAI refuses
+#              reasoning_effort "none".
+API_TYPES = ("ollama", "openai")
+# Secrets section holding one API key per provider name.
+SECRETS_SECTION = "llm_api_keys"
 
 
 class LlmServiceError(ServiceError):
@@ -66,6 +88,10 @@ class LlmConfig(ServiceConfig):
     """
 
     module_name: str = "llm"
+
+    # Display name of the provider this config was resolved from (status only).
+    provider: str = ""
+    api_type: str = "ollama"
 
     endpoint_url: str = "http://ollama.angelfish-gamma.ts.net/v1/chat/completions"
 
@@ -91,6 +117,9 @@ class LlmConfig(ServiceConfig):
     # Ollama thinking-capable models may return reasoning separately from content.
     # For a voice assistant, we usually want direct final answers only.
     disable_reasoning: bool = True
+    # api_type "openai" only: sent as reasoning_effort when set (e.g. "low" for
+    # grok-4.7). Leave empty for non-reasoning models.
+    reasoning_effort: Optional[str] = None
 
     # Some local servers accept extra fields; keep them configurable.
     extra_payload: dict[str, Any] = field(default_factory=dict)
@@ -100,7 +129,52 @@ class LlmConfig(ServiceConfig):
             raise LlmServiceError("endpoint_url must be set")
         if self.timeout_s <= 0:
             raise LlmServiceError(f"timeout_s must be positive: {self.timeout_s}")
+        if self.api_type not in API_TYPES:
+            raise LlmServiceError(f"api_type must be one of {API_TYPES}: {self.api_type!r}")
+        if not self.model:
+            raise LlmServiceError("model must be set")
         return True
+
+
+def config_from_section(section: dict[str, Any]) -> LlmConfig:
+    """
+    Build an LlmConfig from the "llm" config section.
+
+    With a "providers" map, the entry named by "provider" is laid over the
+    shared settings (temperature, max_tokens, ...). Without one, the section is
+    a flat LlmConfig (the pre-provider format). The API key comes from the
+    entry's "api_key", else config/secrets.json "llm_api_keys"[provider], else
+    the env var named by "api_key_env".
+    """
+    section = dict(section)
+    providers = section.pop("providers", None) or {}
+    name = str(section.pop("provider", "") or "")
+    if providers:
+        if name not in providers:
+            raise LlmServiceError(
+                f"unknown LLM provider {name!r}; configured: {sorted(providers)}")
+        section.update(providers[name])
+    section.pop("label", None)
+    key_env = section.pop("api_key_env", None)
+    if not section.get("api_key"):
+        key = load_secrets(SECRETS_SECTION).get(name) if name else None
+        if not key and key_env:
+            key = os.environ.get(key_env)
+        section["api_key"] = key or None
+    section["provider"] = name
+    known = {f.name for f in fields(LlmConfig)}
+    unknown = set(section) - known
+    if unknown:
+        raise LlmServiceError(f"unknown LLM setting(s) {sorted(unknown)} for provider {name!r}")
+    return LlmConfig(**section)
+
+
+def models_url(endpoint_url: str) -> str:
+    """The OpenAI-style model-list URL next to a chat/completions endpoint."""
+    base = endpoint_url.rstrip("/")
+    if base.endswith("/chat/completions"):
+        base = base[: -len("/chat/completions")]
+    return base + "/models"
 
 
 @dataclass(frozen=True)
@@ -203,9 +277,30 @@ class LlmService(Service):
         return {
             "enabled": self.enabled,
             "service": "ok" if self._initialized else "uninitialized",
+            "provider": self.config.provider,
             "model": self.config.model,
             "endpoint": self.config.endpoint_url,
         }
+
+    def list_models(self) -> list[str]:
+        """Model ids the endpoint advertises (GET <base>/models). Raises on failure."""
+        headers = {}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        session = self._session or requests
+        try:
+            response = session.get(models_url(self.config.endpoint_url),
+                                   headers=headers, timeout=min(self.config.timeout_s, 10))
+        except requests.RequestException as exc:
+            raise LlmServiceError(f"model list request failed: {exc}") from exc
+        if response.status_code >= 400:
+            raise LlmResponseError(
+                f"model list returned HTTP {response.status_code}: {response.text[:300]}")
+        try:
+            data = response.json().get("data") or []
+        except (ValueError, AttributeError) as exc:
+            raise LlmResponseError("model list was not OpenAI-style JSON") from exc
+        return sorted(str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id"))
 
     def chat(
         self,
@@ -338,19 +433,26 @@ class LlmService(Service):
             else:
                 normalized_messages.append({"role": msg["role"], "content": msg["content"]})
 
+        effective_max_tokens = self.config.max_tokens if max_tokens is None else max_tokens
         payload: dict[str, Any] = {
             "model": model or self.config.model,
             "messages": normalized_messages,
             "temperature": self.config.temperature if temperature is None else temperature,
-            "max_tokens": self.config.max_tokens if max_tokens is None else max_tokens,
         }
 
-        # Ollama/OpenAI-compatible thinking controls.
-        # Different Ollama versions/models have used different knobs, so include
-        # both. Unsupported fields are generally ignored by local compat servers.
-        if self.config.disable_reasoning:
-            payload["reasoning_effort"] = "none"
-            payload["think"] = False
+        if self.config.api_type == "ollama":
+            payload["max_tokens"] = effective_max_tokens
+            # Ollama thinking controls. Different Ollama versions/models have used
+            # different knobs, so include both; Ollama ignores the one it lacks.
+            if self.config.disable_reasoning:
+                payload["reasoning_effort"] = "none"
+                payload["think"] = False
+        else:
+            # Strict OpenAI-style servers: max_tokens is deprecated there (xAI,
+            # OpenAI), and unknown or out-of-range fields are rejected.
+            payload["max_completion_tokens"] = effective_max_tokens
+            if self.config.reasoning_effort:
+                payload["reasoning_effort"] = self.config.reasoning_effort
 
         effective_top_p = self.config.top_p if top_p is None else top_p
         if effective_top_p is not None:

@@ -9,7 +9,9 @@ The `web` module provides a Flask-based web server and a modernized, responsive,
 - **Chat Interface:** A built-in chat UI to interact with Fishseus directly from the browser, bypassing the microphone.
 - **Configuration Management:** Save and load configurations for audio, STT, LLM, TTS, and motion directly to `fish_config.json`.
 - **Motor Testing:** Dedicated cards for each motor to test speeds, durations, and specific animations (e.g., wiggle, speak placeholder).
-- **Personality Editor:** Live-edit the system prompt that defines the assistant's character.
+- **Personality Editor:** Live-edit the fish's character, the response rules, and its fallback lines.
+- **Tools Editor:** Enable/disable tools and edit each tool's description, usage hint and examples (saved to `config/tool_overrides.json`).
+- **Memory & Context:** Edit long-term memory (name, standing notes, facts, preferences), browse the conversation log with what the fish currently recalls, save a conversation to long-term memory, start fresh, and preview the exact prompt the model receives.
 
 ## Prerequisites
 
@@ -43,9 +45,14 @@ The Flask app exposes JSON endpoints for the frontend:
 
 - `GET /api/status`: Returns current availability of services.
 - `GET /api/config`: Returns the merged configuration dictionary.
-- `POST /api/<section>`: Updates a specific configuration section (e.g., `audio`, `motion`).
+- `POST /api/<section>`: Updates a specific configuration section (e.g., `audio`, `motion`). The `assistant` section's recall settings apply to the running assistant immediately.
 - `GET/POST /api/personality`: Reads or writes the raw `personality_prompt.txt` file.
-- `POST /api/talk`: Sends a text message to the assistant and returns the generated speech and motion tags.
+- `GET /api/prompts`, `POST|DELETE /api/prompts/<key>`: List, customise, or reset the other prompt text.
+- `POST /api/talk`: Runs a full assistant turn (tools, follow-up answer, memory) and returns `reply`, `motion`, `tools`, `memory_updates`. The turn joins the shared conversation.
+- `GET /api/tools`, `PATCH /api/tools/<name>`, `POST /api/tools/<name>/{enable,disable,run,reset}`: Tool management.
+- `GET /api/memory`: Long-term memory. `POST /api/memory/{profile,notes,preferences,facts}`, `DELETE /api/memory/facts[/<key>]`: edit it.
+- `GET /api/memory/history`: Conversation log, each turn flagged `recalled`. `POST /api/memory/history/fresh` (start fresh), `POST /api/memory/history/remember` (summarise into long-term memory), `DELETE /api/memory/history[/<id>]` (delete the log or one turn).
+- `GET /api/assistant/context`: The exact message list the model would get for the next message.
 - `POST /api/motor/<command>`: Executes test motions (`open_mouth`, `wiggle`, `speak_placeholder`, `stop`).
 - `POST /api/services/reset`: Tears down and reinitializes all backend service instances.
 

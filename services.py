@@ -27,6 +27,31 @@ def load_secrets(section: str, path: Path = SECRETS_PATH) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def save_secret(section: str, key: str, value: str | None, path: Path = SECRETS_PATH) -> None:
+    """Set (or, with an empty value, remove) one secret, keeping the file private."""
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ServiceError(f"cannot read {path.name}: {exc}") from exc
+    entries = data.get(section)
+    if not isinstance(entries, dict):
+        entries = {}
+    if value:
+        entries[key] = value
+    else:
+        entries.pop(key, None)
+    data[section] = entries
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    try:
+        tmp.chmod(0o600)  # owner-only; a no-op beyond read-only on Windows
+    except OSError:
+        pass
+    tmp.replace(path)
+
+
 @dataclass(frozen=True)
 class ServiceConfig(ABC):
     """Abstract base class for service configuration."""

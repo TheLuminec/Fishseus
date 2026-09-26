@@ -333,18 +333,39 @@ class SpotifyService(Service):
         except SpotifyServiceError as exc:
             print(f"[spotify] duck failed: {exc}", flush=True)
 
+    def pause_for_speech(self) -> bool:
+        """Fallback for when the fish can't open the speaker while music plays
+        (the music isn't going through a shared mixer): pause instead of ducking.
+        unduck() resumes it. Returns True if the music was paused. Never raises."""
+        if not self._initialized:
+            return False
+        try:
+            with self._lock:
+                if self._paused_for_speech:
+                    return False  # already paused, so pausing can't free the speaker
+                current = self._call(self._client().current_playback)
+                if not current or not current.get("is_playing"):
+                    return False
+                device = current.get("device") or {}
+                self._call(self._client().pause_playback, device_id=device.get("id"))
+                self._paused_for_speech = True
+                return True
+        except SpotifyServiceError as exc:
+            print(f"[spotify] pause for speech failed: {exc}", flush=True)
+            return False
+
     def unduck(self) -> None:
-        """Undo duck(): resume the music or restore its volume. Never raises."""
+        """Undo duck() / pause_for_speech(): restore the volume and resume. Never raises."""
         with self._lock:
             volume, self._ducked_from = self._ducked_from, None
             paused, self._paused_for_speech = self._paused_for_speech, False
             if not self._initialized:
                 return
             try:
+                if volume is not None:
+                    self._call(self._client().volume, volume)
                 if paused:
                     self._call(self._client().start_playback)
-                elif volume is not None:
-                    self._call(self._client().volume, volume)
             except SpotifyServiceError as exc:
                 print(f"[spotify] unduck failed: {exc}", flush=True)
 

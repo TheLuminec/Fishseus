@@ -113,4 +113,25 @@ Then point both players at it: `tts.audio_device` is `"fishout"` in
 `fish_config.json`, and set `LIBRESPOT_DEVICE="fishout"` in
 `/etc/raspotify/conf`. Without this device the fish can't play audio at all —
 set up the mixer first, or use `"duck_mode": "pause"` with a `plughw:` device.
-`TtsService.play_wav()` still retries for up to 2 s on a busy device.
+`TtsService.play_wav()` still retries for up to 2 s on a busy device. If the device
+is still busy while music plays, the orchestrator pauses Spotify for that reply and
+retries, so a broken mixer setup degrades to pause mode instead of a silent fish.
+
+### Troubleshooting: `unable to open slave` / `Device or resource busy`
+
+```
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+aplay: main:850: audio open error: Device or resource busy
+```
+
+`fishout` couldn't open the sound card because another program holds it
+*directly*, not through the mixer — almost always raspotify. Check
+`/etc/raspotify/conf`:
+
+- `LIBRESPOT_DEVICE="fishout"` must be set (uncommented). This is where the music
+  plays.
+- `LIBRESPOT_ALSA_MIXER_DEVICE` is only the volume control and does **not**
+  change where the music plays. Leave it commented out.
+
+Restart with `sudo systemctl restart raspotify`. The Speaker & Mixing page in the
+web UI reads this file and flags a wrong `LIBRESPOT_DEVICE`.

@@ -44,10 +44,10 @@ from typing import Optional
 
 from audio.audio_service import AudioConfig, AudioService
 from stt.stt_service import SttConfig, SttService
-from llm.llm_service import LlmConfig, LlmService
+from llm.llm_service import LlmService, config_from_section as llm_config_from_section
 from assistant.assistant_service import AssistantConfig, AssistantService
 from motion.motion_service import MotionConfig, MotionService, MotorConfig
-from tts.tts_service import TtsConfig, TtsService
+from tts.tts_service import TtsConfig, TtsService, TtsServiceError
 from vision.vision_service import VisionConfig, VisionService
 from sensors.sensor_service import SensorConfig, SensorService, SensorEvent
 from bluetooth.bluetooth_service import BluetoothConfig, BluetoothService
@@ -79,7 +79,6 @@ class Fishseus:
     """
 
     POST_SPEECH_COOLDOWN = 1.5   # seconds after TTS before re-enabling mic
-    SESSION_IDLE_TIMEOUT = 3600  # seconds of silence before auto-clearing history (1 hour)
 
     def __init__(self, web_port: int = 8000, enable_web: bool = True) -> None:
         self.web_port = web_port
@@ -88,7 +87,6 @@ class Fishseus:
         self.running = False
         self._speaking = False      # True while TTS is playing (mic suppressed)
         self._speaking_lock = threading.Lock()
-        self._last_interaction: float = 0.0  # monotonic time of last handled command
 
         # Services — populated in initialize()
         self.audio: Optional[AudioService] = None
@@ -135,14 +133,8 @@ class Fishseus:
 
         self._speech_wav.parent.mkdir(parents=True, exist_ok=True)
 
-        pers_path = (config_dir / asst_cfg.get(
-            "personality_path", "../config/personality_prompt.txt"
-        )).resolve()
-        mem_path  = PROJECT_ROOT / "data" / "assistant_memory.json"
-        hist_path = PROJECT_ROOT / "data" / "conversation_log.jsonl"
         tts_out   = (config_dir / tts_cfg.get("output_dir", "../tmp/tts")).resolve()
         tts_out.mkdir(parents=True, exist_ok=True)
-        mem_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Audio
         _log("init", "Starting audio service…")
@@ -156,8 +148,10 @@ class Fishseus:
 
         # LLM
         _log("init", "Starting LLM service…")
-        self.llm = LlmService(LlmConfig(**llm_cfg))
+        self.llm = LlmService(llm_config_from_section(llm_cfg))
         self.llm.initialize()
+        _log("init", f"LLM provider: {self.llm.config.provider or '(flat config)'} "
+                     f"-> {self.llm.config.model}")
 
         # TTS  — persistent=True keeps piper loaded in memory
         _log("init", "Starting TTS service (persistent piper daemon)…")
@@ -216,15 +210,11 @@ class Fishseus:
             get_spotify      = lambda: self.spotify,
             get_access_point = lambda: self.access_point,
         )
+        # Paths in the "assistant" section are relative to config/; memory and
+        # the conversation log default to data/.
         self.assistant = AssistantService(
             llm=self.llm,
-            config=AssistantConfig(
-                assistant_name = asst_cfg.get("assistant_name", "Fishseus"),
-                user_name      = asst_cfg.get("user_name", "User"),
-                personality_path = pers_path,
-                memory_path    = mem_path,
-                history_path   = hist_path,
-            ),
+            config=AssistantConfig.from_section(asst_cfg, config_dir=config_dir),
             tool_registry=tool_registry,
         )
         self.assistant.initialize()
@@ -255,14 +245,6 @@ class Fishseus:
             if is_speaking:
                 time.sleep(0.05)
                 continue
-
-            # Auto-clear conversation history after prolonged inactivity.
-            if self._last_interaction > 0 and self.assistant is not None:
-                idle_s = time.monotonic() - self._last_interaction
-                if idle_s > self.SESSION_IDLE_TIMEOUT:
-                    _log("session", f"Idle for {idle_s / 3600:.1f}h — auto-clearing conversation history")
-                    self.assistant.clear_history()
-                    self._last_interaction = 0.0
 
             # Handle any queued sensor events before listening again.
             try:
@@ -299,7 +281,6 @@ class Fishseus:
                 continue
 
             command = stt_result.command_text.strip() or "Hello."
-            self._last_interaction = time.monotonic()
             self._handle_command(command)
 
     # -------------------------------------------------------------------
@@ -341,59 +322,32 @@ class Fishseus:
         # than a full-power wiggle for every single command).
         self.motion.wiggle(cycles=1, speed_scale=0.75)
 
+        # The assistant calls this for each line: a short remark while a tool
+        # runs (final=False keeps the mic muted so there's no gap), then the
+        # answer. Tool results are folded into the answer by the assistant.
+        def say(text: str, motion_hint: str, final: bool) -> None:
+            self._speak_with_motion(text, motion_hint, cooldown=final)
+
         try:
-            result = self.assistant.handle_user_text(command)
+            result = self.assistant.handle_user_text(command, source="voice", say=say)
         except Exception as exc:
             _log("assistant", f"AssistantService error: {exc}")
             self._speak_with_motion("Sorry, my brain got tangled in seaweed.", "annoyed")
             return
+        finally:
+            # If a turn died after a mid-turn line, the mic is still muted.
+            self._release_mic()
 
-        _log("assistant", f"speak='{result.speak}'  motion={result.motion}  tools={[c.name for c in result.tool_calls]}  elapsed={result.elapsed_s:.2f}s")
-
-        has_speak = bool(result.speak and result.speak.strip())
-
-        # Successful tool results that carry information back to be spoken.
-        data_results = [
-            r for r in result.tool_results
-            if r.get("ok") and r.get("returns_data") and r.get("result") is not None
-        ]
-
-        spoken_parts: list[str] = []
-
-        if data_results:
-            # If the fish chose to say a line, speak it first as banter while it
-            # "checks" — keep the mic suppressed so there's no gap before the answer.
-            if has_speak:
-                self._speak_with_motion(result.speak, result.motion, cooldown=False)
-                spoken_parts.append(result.speak)
-
-            # Rich data (weather, vision, memory) always gets folded into a spoken
-            # sentence by the LLM. Short raw values (time, dice, math) can be spoken
-            # directly ONLY when the fish already gave a line — otherwise we still
-            # formulate so a silent tool call yields one natural, in-character reply.
-            needs_synthesis = any(r.get("synthesize_result") for r in data_results)
-            if needs_synthesis or not has_speak:
-                answer, answer_motion = self.assistant.formulate_tool_response(command, data_results)
-            else:
-                answer = " ".join(str(r["result"]) for r in data_results)
-                answer_motion = "speaking"
-
-            self._speak_with_motion(answer, answer_motion, cooldown=True)
-            spoken_parts.append(answer)
-
-        elif has_speak:
-            self._speak_with_motion(result.speak, result.motion, cooldown=True)
-            spoken_parts.append(result.speak)
-
-        else:
+        _log("assistant", f"speak='{result.speak}'  motion={result.motion}  "
+                          f"tools={[c.name for c in result.tool_calls]}  "
+                          f"memory={[u['key'] for u in result.memory_updates]}  "
+                          f"elapsed={result.elapsed_s:.2f}s")
+        if result.answer:
+            _log("assistant", f"answer='{result.answer}'")
+        if not result.spoken_text:
             # Silent turn: an action-only tool call (e.g. wiggle) already ran, or
             # the model had nothing to say. Stay quiet rather than inventing filler.
             _log("assistant", "Silent turn — no speech.")
-
-        # Record what was actually spoken so conversation history stays coherent
-        # (handle_user_text only saw the first-pass placeholder).
-        if spoken_parts:
-            self.assistant.set_last_response(" ".join(spoken_parts))
 
     # -------------------------------------------------------------------
     # Speaking (mic suppression + TTS + motion)
@@ -432,7 +386,7 @@ class Fishseus:
             _log("tts", f"Playing {tts_wav}…")
             self.motion.speak_audio(tts_wav)
             try:
-                self.tts.play_wav(tts_wav, blocking=True)
+                self._play_speech(tts_wav)
             except Exception as exc:
                 _log("tts", f"Playback failed: {exc}")
 
@@ -442,11 +396,37 @@ class Fishseus:
 
         finally:
             if cooldown:
-                if self.spotify is not None:
-                    self.spotify.unduck()
-                self.audio.start_capture(amplitude_callback=self._on_amplitude)
-                with self._speaking_lock:
-                    self._speaking = False
+                self._release_mic()
+
+    def _release_mic(self) -> None:
+        """End a speech sequence: restore music volume and re-enable the mic."""
+        assert self.audio is not None
+        with self._speaking_lock:
+            if not self._speaking:
+                return
+            self._speaking = False
+        if self.spotify is not None:
+            self.spotify.unduck()
+        self.audio.start_capture(amplitude_callback=self._on_amplitude)
+
+    def _play_speech(self, wav: Path) -> None:
+        """Play a reply. If the speaker is busy because music holds it (no shared
+        mixer), pause Spotify for this reply and retry rather than stay silent."""
+        assert self.tts is not None and self.motion is not None
+        try:
+            self.tts.play_wav(wav, blocking=True)
+            return
+        except TtsServiceError as exc:
+            if "busy" not in str(exc).lower() or self.spotify is None:
+                raise
+            if not self.spotify.pause_for_speech():
+                raise
+        _log("tts", "Speaker busy while music plays — paused Spotify for this reply. "
+                    "Mixing isn't working; check the Speaker & Mixing page.")
+        # The mouth animation started with the failed attempt; restart it in sync.
+        self.motion.stop_all()
+        self.motion.speak_audio(wav)
+        self.tts.play_wav(wav, blocking=True)
 
     def _pre_speech_reaction(self, motion_hint: str) -> None:
         if motion_hint in {"happy", "excited"}:

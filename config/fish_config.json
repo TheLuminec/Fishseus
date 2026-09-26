@@ -21,11 +21,25 @@
     "strip_wake_word": true
   },
   "llm": {
-    "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
-    "model": "qwen2.5:3b",
+    "provider": "ollama",
     "temperature": 0.75,
     "max_tokens": 1024,
-    "disable_reasoning": false
+    "providers": {
+      "ollama": {
+        "label": "Ollama (tailnet)",
+        "api_type": "ollama",
+        "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
+        "model": "qwen2.5:3b",
+        "disable_reasoning": false
+      },
+      "xai": {
+        "label": "xAI Grok",
+        "api_type": "openai",
+        "endpoint_url": "https://api.x.ai/v1/chat/completions",
+        "model": "grok-4.20-0309-non-reasoning",
+        "api_key_env": "XAI_API_KEY"
+      }
+    }
   },
   "tts": {
     "piper_binary": "../tts/.venv/bin/piper",

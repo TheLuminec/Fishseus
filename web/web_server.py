@@ -23,6 +23,7 @@ from __future__ import annotations
 import atexit
 import copy
 import json
+import os
 import re
 import subprocess
 import sys
@@ -83,9 +84,10 @@ except Exception:
 # LLM
 try:
     from llm.llm_service import LlmConfig, LlmService  # type: ignore[import-untyped]
+    from llm.llm_service import config_from_section as llm_config_from_section  # type: ignore[import-untyped]
     _available["llm"] = True
 except Exception:
-    LlmConfig = LlmService = None  # type: ignore[assignment, misc]
+    LlmConfig = LlmService = llm_config_from_section = None  # type: ignore[assignment, misc]
 
 # Assistant (also needs llm to function)
 try:
@@ -142,11 +144,18 @@ DEFAULT_CONFIG: dict[str, object] = {
         "wake_words": ["fish", "fishseus", "hey fish"],
     },
     "llm": {
-        "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
-        "model": "qwen2.5:3b",
+        "provider": "ollama",
         "temperature": 0.7,
         "max_tokens": 512,
-        "disable_reasoning": True,
+        "providers": {
+            "ollama": {
+                "label": "Ollama (tailnet)",
+                "api_type": "ollama",
+                "endpoint_url": "http://ollama.angelfish-gamma.ts.net/v1/chat/completions",
+                "model": "qwen2.5:3b",
+                "disable_reasoning": True,
+            },
+        },
     },
     "tts": {
         "piper_binary": "../tts/.venv/bin/piper",
@@ -370,18 +379,7 @@ def init_services() -> None:
     # --- LLM ---
     if _available["llm"] and _llm is None:
         try:
-            lc = config.get("llm", {})
-            _llm = LlmService(
-                LlmConfig(
-                    endpoint_url=lc.get("endpoint_url"),
-                    model=lc.get("model"),
-                    timeout_s=60.0,
-                    retries=1,
-                    temperature=float(lc.get("temperature", 0.7)),
-                    max_tokens=int(lc.get("max_tokens", 512)),
-                    disable_reasoning=bool(lc.get("disable_reasoning", True)),
-                )
-            )
+            _llm = LlmService(llm_config_from_section(config.get("llm", {})))
             print("[web] LLM service ready")
         except Exception as exc:
             print(f"[web] LLM service init failed: {exc}")
@@ -391,29 +389,21 @@ def init_services() -> None:
     # --- Assistant (requires LLM) ---
     if _available["assistant"] and _assistant is None and _llm is not None:
         try:
-            ac = config.get("assistant", {})
             _assistant = AssistantService(
                 llm=_llm,
-                config=AssistantConfig(
-                    assistant_name=ac.get("assistant_name", "Fishseus"),
-                    user_name=ac.get("user_name", "User"),
-                    personality_path=Path(
-                        ac.get("personality_path", "../config/personality_prompt.txt")
-                    ).resolve(),
-                    memory_path=Path(
-                        ac.get(
-                            "memory_path",
-                            str(PROJECT_ROOT / "data" / "assistant_memory.json"),
-                        )
-                    ),
-                    history_path=Path(
-                        ac.get(
-                            "history_path",
-                            str(PROJECT_ROOT / "data" / "conversation_log.jsonl"),
-                        )
-                    ),
-                ),
+                config=AssistantConfig.from_section(
+                    config.get("assistant", {}), config_dir=CONFIG_FILE.parent),
             )
+            # Standalone mode has no orchestrator to inject tools, so build the
+            # registry here; tools resolve services through these module globals.
+            from assistant.tools import build_tool_registry
+            _assistant.tool_registry = build_tool_registry(
+                get_motion=lambda: _motion,
+                get_tts=lambda: _tts,
+                get_assistant=lambda: _assistant,
+                get_vision=lambda: _vision,
+            )
+            set_tool_registry(_assistant.tool_registry)
             print("[web] Assistant service ready")
         except Exception as exc:
             print(f"[web] Assistant service init failed: {exc}")
@@ -720,10 +710,17 @@ def api_section(section: str):
         new_config = _build_live_config(section, config_section)
     except Exception as exc:
         return jsonify({"error": f"Not saved: {exc}"}), 400
+    if section == "assistant" and _assistant is not None:
+        # Validate against the running assistant before saving anything.
+        try:
+            _assistant.apply_settings(data)
+        except Exception as exc:
+            return jsonify({"error": f"Not saved: {exc}"}), 400
     config[section] = config_section
     save_config(config)
     # Swap the running service's config so the change applies without a restart.
-    service = {"spotify": _spotify, "bluetooth": _bluetooth, "access_point": _access_point}.get(section)
+    service = {"spotify": _spotify, "bluetooth": _bluetooth, "access_point": _access_point,
+               "llm": _llm}.get(section)
     if service is not None and new_config is not None:
         service.config = new_config
     return jsonify({"status": "saved"})
@@ -734,6 +731,12 @@ def _build_live_config(section: str, values: dict):
     (so it can be swapped in live), else None. Raises on invalid values, so a bad
     setting is rejected rather than saved and left to break the next start-up.
     "enabled" is an orchestrator key and still needs a Fishseus restart."""
+    if section == "llm":
+        # Resolves the active provider (and its API key) into one flat config.
+        from llm.llm_service import config_from_section
+        new_config = config_from_section(values)
+        new_config.validate()
+        return new_config
     if section == "spotify":
         from spotify.spotify_service import SpotifyConfig as cls
     elif section == "bluetooth":
@@ -953,11 +956,15 @@ def api_talk():
         return jsonify({"error": "Empty message"}), 400
 
     try:
-        result = _assistant.handle_user_text(message)
+        # Same full turn as the voice path (tools, follow-up answer, memory),
+        # recorded in the shared conversation; it just isn't spoken aloud.
+        result = _assistant.handle_user_text(message, source="web")
         return jsonify(
             {
-                "reply": getattr(result, "speak", ""),
-                "motion": getattr(result, "motion", "speaking"),
+                "reply": result.spoken_text,
+                "motion": result.answer_motion or result.motion,
+                "tools": [call.name for call in result.tool_calls],
+                "memory_updates": result.memory_updates,
             }
         )
     except Exception as exc:
@@ -1057,6 +1064,119 @@ def api_sensors_status():
         return jsonify({"available": True, "sensors": _sensors.sensor_report()})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+# --- LLM providers ---
+
+def _llm_config_for(body: dict):
+    """Config for body["provider"], with any unsaved edits in body["entry"] laid
+    over the saved entry, so Load models / Test work before saving."""
+    section = copy.deepcopy(load_config().get("llm", {}))
+    name = str(body.get("provider") or section.get("provider") or "")
+    providers = section.setdefault("providers", {})
+    entry = body.get("entry")
+    if isinstance(entry, dict):
+        providers[name] = {**providers.get(name, {}), **entry}
+    section["provider"] = name
+    config = llm_config_from_section(section)
+    config.validate()
+    return config
+
+
+def _key_hint(key: str) -> str:
+    return f"…{key[-4:]}" if len(key) >= 8 else "set"
+
+
+@app.route("/api/llm/providers")
+def api_llm_providers():
+    """Provider list with key status (never the key itself) plus the live config."""
+    from services import load_secrets
+    section = load_config().get("llm", {})
+    keys = load_secrets("llm_api_keys")
+    providers = {}
+    for name, entry in (section.get("providers") or {}).items():
+        key = keys.get(name) or ""
+        env = entry.get("api_key_env")
+        providers[name] = {
+            **{k: v for k, v in entry.items() if k != "api_key"},
+            "has_key": bool(key or entry.get("api_key") or (env and os.environ.get(env))),
+            "key_hint": _key_hint(key) if key else ("from $" + env if env and os.environ.get(env) else ""),
+        }
+    return jsonify({
+        "provider": section.get("provider", ""),
+        "providers": providers,
+        "live": _llm.status() if _llm is not None else None,
+    })
+
+
+@app.route("/api/llm/api_key", methods=["POST"])
+def api_llm_api_key():
+    """Store (or clear, with an empty key) a provider's API key in secrets.json.
+    Write-only: the key is never sent back to the browser."""
+    from services import save_secret
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("provider", "")).strip()
+    key = str(data.get("api_key", "")).strip()
+    if name not in (load_config().get("llm", {}).get("providers") or {}):
+        return jsonify({"error": f"Unknown provider '{name}'"}), 404
+    try:
+        save_secret("llm_api_keys", name, key or None)
+    except Exception as exc:
+        return jsonify({"error": f"Could not save key: {exc}"}), 500
+    # If this is the live provider, pick the new key up immediately.
+    if _llm is not None and _llm.config.provider == name:
+        try:
+            _llm.config = llm_config_from_section(load_config().get("llm", {}))
+        except Exception:
+            pass
+    return jsonify({"status": "API key saved" if key else "API key removed"})
+
+
+@app.route("/api/llm/models", methods=["POST"])
+def api_llm_models():
+    """Model ids the provider advertises (OpenAI-style GET /models)."""
+    if LlmService is None:
+        return jsonify({"error": "LLM service unavailable"}), 503
+    try:
+        service = LlmService(_llm_config_for(request.get_json(silent=True) or {}))
+        try:
+            models = service.list_models()
+        finally:
+            service.shutdown()
+        return jsonify({"status": f"Found {len(models)} model(s)", "models": models})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.route("/api/llm/test", methods=["POST"])
+def api_llm_test():
+    """One real request in the same JSON mode the assistant uses; reports latency."""
+    if LlmService is None:
+        return jsonify({"error": "LLM service unavailable"}), 503
+    try:
+        config = _llm_config_for(request.get_json(silent=True) or {})
+        service = LlmService(config)
+        try:
+            result = service.chat(
+                [
+                    {"role": "system", "content":
+                        'You are a talking fish. Reply only with JSON: {"speak": "<one short sentence>"}'},
+                    {"role": "user", "content": "Say hello."},
+                ],
+                max_tokens=150,
+                response_format={"type": "json_object"},
+            )
+        finally:
+            service.shutdown()
+        parsed = result.parse_json_content() or {}
+        reply = parsed.get("speak") or result.content
+        return jsonify({
+            "status": f"{config.model} replied in {result.elapsed_s:.1f}s",
+            "reply": reply,
+            "elapsed_s": round(result.elapsed_s, 2),
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
 
 
 # --- Spotify (orchestrator mode only) ---
@@ -1189,12 +1309,31 @@ def _list_alsa_pcms() -> list[str]:
             if line and not line[0].isspace() and line.strip() != "null"]
 
 
+RASPOTIFY_CONF = Path("/etc/raspotify/conf")
+
+
+def _raspotify_settings(path: Path = RASPOTIFY_CONF) -> dict | None:
+    """Active LIBRESPOT_* settings from the raspotify config, or None if absent."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    settings = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("LIBRESPOT_") and "=" in line:
+            key, _, value = line.partition("=")
+            settings[key.strip()] = value.strip().strip('"').strip("'")
+    return settings
+
+
 @app.route("/api/audio/output")
 def api_audio_output():
     """Current speaker routing: TTS device, mixer presence, ducking mode."""
     config = load_config()
     pcms = _list_alsa_pcms()
     device = config.get("tts", {}).get("audio_device", "")
+    raspotify = _raspotify_settings()
     return jsonify({
         "audio_device": device,
         "pcms": pcms,
@@ -1205,6 +1344,10 @@ def api_audio_output():
         "duck_percent": config.get("spotify", {}).get("duck_percent", 30),
         "spotify_running": _spotify is not None,
         "bluetooth_running": _bluetooth is not None,
+        # Where raspotify sends its audio (librespot's default is "default");
+        # None when raspotify isn't installed. The mixer device is only volume.
+        "raspotify_device": None if raspotify is None else raspotify.get("LIBRESPOT_DEVICE", "default"),
+        "raspotify_mixer_device": None if raspotify is None else raspotify.get("LIBRESPOT_ALSA_MIXER_DEVICE"),
     })
 
 
@@ -1228,9 +1371,15 @@ def api_audio_test():
 
 # --- Tool management ---
 
+def _tool_registry_or_error():
+    if _tool_registry is None:
+        return None, (jsonify({"error": "Tool registry unavailable"}), 503)
+    return _tool_registry, None
+
+
 @app.route("/api/tools", methods=["GET"])
 def api_tools_list():
-    """List all registered tools with their current state."""
+    """List all registered tools with their current state, hints and examples."""
     if _tool_registry is None:
         return jsonify({"tools": []})
     return jsonify({"tools": _tool_registry.list_all()})
@@ -1238,34 +1387,37 @@ def api_tools_list():
 
 @app.route("/api/tools/<name>/enable", methods=["POST"])
 def api_tool_enable(name: str):
-    """Enable a tool so the LLM can see and call it."""
-    if _tool_registry is None:
-        return jsonify({"error": "Tool registry unavailable"}), 503
-    _tool_registry.enable(name)
+    """Enable a tool so the LLM can see and call it (persists across restarts)."""
+    registry, error = _tool_registry_or_error()
+    if error:
+        return error
+    registry.enable(name)
     return jsonify({"status": f"{name} enabled"})
 
 
 @app.route("/api/tools/<name>/disable", methods=["POST"])
 def api_tool_disable(name: str):
     """Disable a tool — hides it from the LLM and blocks execution."""
-    if _tool_registry is None:
-        return jsonify({"error": "Tool registry unavailable"}), 503
-    _tool_registry.disable(name)
+    registry, error = _tool_registry_or_error()
+    if error:
+        return error
+    registry.disable(name)
     return jsonify({"status": f"{name} disabled"})
 
 
 @app.route("/api/tools/<name>/run", methods=["POST"])
 def api_tool_run(name: str):
     """Execute a tool directly, bypassing the LLM."""
-    if _tool_registry is None:
-        return jsonify({"error": "Tool registry unavailable"}), 503
+    registry, error = _tool_registry_or_error()
+    if error:
+        return error
     if ToolCall is None:
         return jsonify({"error": "assistant_service not importable"}), 503
     data = request.get_json(silent=True) or {}
     args = data.get("args", {})
     try:
-        call = ToolCall(name=name, args=args)
-        result = _tool_registry.execute(call)
+        call = ToolCall(name=name, args=args if isinstance(args, dict) else {})
+        result = registry.execute(call)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -1273,24 +1425,48 @@ def api_tool_run(name: str):
 
 @app.route("/api/tools/<name>", methods=["PATCH"])
 def api_tool_update(name: str):
-    """Edit a tool's description or synthesize_result flag."""
-    if _tool_registry is None:
-        return jsonify({"error": "Tool registry unavailable"}), 503
+    """Edit a tool's description, hint, examples, or synthesize_result flag."""
+    registry, error = _tool_registry_or_error()
+    if error:
+        return error
     data = request.get_json(silent=True) or {}
-    if "description" in data:
-        _tool_registry.update_description(name, str(data["description"]))
-    if "synthesize_result" in data:
-        _tool_registry.set_synthesize_result(name, bool(data["synthesize_result"]))
+    changes = {k: data[k] for k in ("description", "hint", "examples", "synthesize_result", "enabled")
+               if k in data}
+    try:
+        registry.update(name, **changes)
+    except KeyError:
+        return jsonify({"error": f"Unknown tool '{name}'"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify({"status": "updated"})
 
 
-# --- Memory and conversation history ---
+@app.route("/api/tools/<name>/reset", methods=["POST"])
+def api_tool_reset(name: str):
+    """Restore a tool's description, hint, examples and flags to the code defaults."""
+    registry, error = _tool_registry_or_error()
+    if error:
+        return error
+    try:
+        registry.reset(name)
+    except KeyError:
+        return jsonify({"error": f"Unknown tool '{name}'"}), 404
+    return jsonify({"status": f"{name} reset to defaults"})
+
+
+# --- Long-term memory ---
+
+def _assistant_or_error():
+    if _assistant is None:
+        return None, (jsonify({"error": "Assistant unavailable"}), 503)
+    return _assistant, None
+
 
 @app.route("/api/memory", methods=["GET"])
 def api_memory():
-    """Return the full assistant memory JSON."""
+    """Return the full long-term memory."""
     if _assistant is not None:
-        return jsonify(_assistant.memory.data)
+        return jsonify(_assistant.memory.snapshot())
     mem_file = PROJECT_ROOT / "data" / "assistant_memory.json"
     if mem_file.exists():
         try:
@@ -1300,44 +1476,138 @@ def api_memory():
     return jsonify({"error": "Memory unavailable"}), 503
 
 
-@app.route("/api/memory/update", methods=["POST"])
-def api_memory_update():
-    """Update a dotted-key path in memory (e.g. profile.user_name)."""
-    if _assistant is None:
-        return jsonify({"error": "Assistant unavailable"}), 503
+@app.route("/api/memory/profile", methods=["POST"])
+def api_memory_profile():
+    """Set profile fields: {"user_name": "...", "assistant_name": "..."}."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    for field in ("user_name", "assistant_name"):
+        if field in data:
+            assistant.memory.set_profile(field, data[field])
+    assistant.memory.save()
+    return jsonify({"status": "profile saved"})
+
+
+@app.route("/api/memory/notes", methods=["POST"])
+def api_memory_notes():
+    """Replace the owner's standing notes (always in the fish's context)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    assistant.memory.set_notes(str(data.get("text", "")))
+    assistant.memory.save()
+    return jsonify({"status": "notes saved"})
+
+
+@app.route("/api/memory/preferences", methods=["POST"])
+def api_memory_preference():
+    """Set one preference: {"key", "value", "original_key"?}. An empty value removes it."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
     data = request.get_json(silent=True) or {}
     key = str(data.get("key", "")).strip()
-    value = data.get("value")
     if not key:
         return jsonify({"error": "key is required"}), 400
-    _assistant.memory.update_path(key, value)
-    _assistant.memory.save()
+    original = str(data.get("original_key", "")).strip()
+    if original and original != key:
+        assistant.memory.set_preference(original, "")
+    assistant.memory.set_preference(key, data.get("value", ""))
+    assistant.memory.save()
+    return jsonify({"status": "preference saved"})
+
+
+@app.route("/api/memory/facts", methods=["POST"])
+def api_memory_fact_save():
+    """Add or edit a fact: {"key", "value", "original_key"?} (original_key renames)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("key", "")).strip()
+    value = str(data.get("value", "")).strip()
+    original = str(data.get("original_key", "")).strip()
+    if not value:
+        return jsonify({"error": "The fact needs some text"}), 400
+    memory = assistant.memory
+    if original and key and original != key:
+        if not memory.rename_fact(original, key):
+            return jsonify({"error": f"Couldn't rename: a fact labelled '{key}' already exists"}), 400
+    status, stored_key = memory.remember(key or original, value)
+    if status == "ignored":
+        return jsonify({"error": "Couldn't store that fact"}), 400
+    memory.save()
+    return jsonify({"status": f"fact {status}", "key": stored_key})
+
+
+@app.route("/api/memory/facts/<key>", methods=["DELETE"])
+def api_memory_fact_delete(key: str):
+    """Delete one fact by label."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    if not assistant.memory.delete_fact(key):
+        return jsonify({"error": f"No fact labelled '{key}'"}), 404
+    assistant.memory.save()
+    return jsonify({"status": "fact deleted"})
+
+
+@app.route("/api/memory/update", methods=["POST"])
+def api_memory_update():
+    """Apply one dotted-key update, as the model would (e.g. profile.user_name)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("key", "")).strip()
+    if not key:
+        return jsonify({"error": "key is required"}), 400
+    if assistant.memory.apply_update(key, data.get("value")) is None:
+        return jsonify({"error": "Nothing changed"}), 400
+    assistant.memory.save()
     return jsonify({"status": "updated"})
 
 
 @app.route("/api/memory/facts", methods=["DELETE"])
 def api_memory_clear_facts():
     """Clear all stored facts from memory."""
-    if _assistant is None:
-        return jsonify({"error": "Assistant unavailable"}), 503
-    _assistant.memory.data["facts"] = []
-    _assistant.memory.save()
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    assistant.memory.clear_facts()
+    assistant.memory.save()
     return jsonify({"status": "facts cleared"})
 
 
+# --- Conversation memory ---
+
 @app.route("/api/memory/history", methods=["GET"])
 def api_memory_history():
-    """Return recent conversation log entries."""
-    n = request.args.get("n", 30, type=int)
+    """Recent conversation log entries, flagged with whether the fish still recalls them."""
+    n = request.args.get("n", 50, type=int)
+    if _assistant is not None:
+        conversation = _assistant.conversation
+        recalled = conversation.recalled_ids()
+        turns = conversation.log(n)
+        for turn in turns:
+            turn["recalled"] = turn.get("id") in recalled
+        return jsonify({
+            "turns": turns,
+            "recalled_count": len(recalled),
+            "recall_hours": _assistant.config.recall_hours,
+            "max_recall_turns": _assistant.config.max_recall_turns,
+            "require_explicit_memory_intent": _assistant.config.require_explicit_memory_intent,
+        })
     hist_file = PROJECT_ROOT / "data" / "conversation_log.jsonl"
     if not hist_file.exists():
         return jsonify({"turns": []})
     try:
-        raw = hist_file.read_text(encoding="utf-8").strip()
-        lines = [l for l in raw.split("\n") if l.strip()]
-        recent = lines[-n:]
+        lines = [l for l in hist_file.read_text(encoding="utf-8").split("\n") if l.strip()]
         turns = []
-        for line in recent:
+        for line in lines[-n:]:
             try:
                 turns.append(json.loads(line))
             except Exception:
@@ -1347,18 +1617,96 @@ def api_memory_history():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/memory/history/fresh", methods=["POST"])
+def api_memory_history_fresh():
+    """Start fresh: the fish stops recalling the conversation so far (the log is kept)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    assistant.clear_history()
+    return jsonify({"status": "Starting fresh — earlier conversation is no longer recalled"})
+
+
+@app.route("/api/memory/history/remember", methods=["POST"])
+def api_memory_history_remember():
+    """Summarize the recalled conversation into long-term memory (same as the tool)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    try:
+        report = assistant.remember_conversation(str(data.get("focus", "")))
+    except Exception as exc:
+        return jsonify({"error": f"Couldn't save the conversation: {exc}"}), 500
+    return jsonify({"status": report})
+
+
+@app.route("/api/memory/history/<turn_id>", methods=["DELETE"])
+def api_memory_history_delete_turn(turn_id: str):
+    """Delete one turn from the log and from recall (e.g. a misheard exchange)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    if not assistant.conversation.delete(turn_id):
+        return jsonify({"error": "Turn not found"}), 404
+    return jsonify({"status": "turn deleted"})
+
+
 @app.route("/api/memory/history", methods=["DELETE"])
 def api_memory_clear_history():
-    """Clear the conversation log file and in-memory history."""
+    """Delete the whole conversation log (and with it, everything recalled)."""
+    if _assistant is not None:
+        _assistant.conversation.wipe()
+        return jsonify({"status": "history cleared"})
     hist_file = PROJECT_ROOT / "data" / "conversation_log.jsonl"
     try:
         hist_file.parent.mkdir(parents=True, exist_ok=True)
         hist_file.write_text("", encoding="utf-8")
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
-    if _assistant is not None:
-        _assistant.history.clear()
     return jsonify({"status": "history cleared"})
+
+
+# --- Prompt text & context preview ---
+
+@app.route("/api/prompts", methods=["GET"])
+def api_prompts():
+    """Editable prompt text (response rules, follow-up nudge, fallback lines...)."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    return jsonify({"texts": assistant.texts.describe()})
+
+
+@app.route("/api/prompts/<key>", methods=["POST", "DELETE"])
+def api_prompt_text(key: str):
+    """POST {"text"} to customise one prompt text; DELETE to restore its default."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    try:
+        if request.method == "DELETE":
+            assistant.texts.reset(key)
+            return jsonify({"status": "restored default"})
+        data = request.get_json(silent=True) or {}
+        assistant.texts.set(key, str(data.get("text", "")))
+        return jsonify({"status": "saved"})
+    except KeyError:
+        return jsonify({"error": f"Unknown prompt text '{key}'"}), 404
+
+
+@app.route("/api/assistant/context", methods=["GET"])
+def api_assistant_context():
+    """The exact messages the model would receive for the next message."""
+    assistant, error = _assistant_or_error()
+    if error:
+        return error
+    messages = assistant.context_preview()
+    return jsonify({
+        "messages": messages,
+        "chars": sum(len(m["content"]) for m in messages),
+        "recalled_turns": len(assistant.conversation.recent()),
+    })
 
 
 # --- Services reset ---
