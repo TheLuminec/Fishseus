@@ -53,6 +53,7 @@ from sensors.sensor_service import SensorConfig, SensorService, SensorEvent
 from bluetooth.bluetooth_service import BluetoothConfig, BluetoothService
 from spotify.spotify_service import SpotifyConfig, SpotifyService
 from access_point.access_point_service import AccessPointConfig, AccessPointService
+from claude_link.claude_link_service import ClaudeLinkConfig, ClaudeLinkService
 from assistant.tools import build_tool_registry
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -100,9 +101,12 @@ class Fishseus:
         self.bluetooth: Optional[BluetoothService] = None
         self.spotify: Optional[SpotifyService] = None
         self.access_point: Optional[AccessPointService] = None
+        self.claude_link: Optional[ClaudeLinkService] = None
 
         # Sensor events queued by the watcher thread, consumed by run().
         self._event_queue: "Queue[SensorEvent]" = Queue()
+        # Lines to speak that arrive asynchronously (Claude replies, outbox).
+        self._announce_queue: "Queue[tuple[str, str]]" = Queue()
 
         self._speech_wav = PROJECT_ROOT / "tmp" / "latest_speech.wav"
 
@@ -130,6 +134,7 @@ class Fishseus:
         bt_cfg      = app_config.get("bluetooth", {})
         spotify_cfg = app_config.get("spotify", {})
         ap_cfg      = app_config.get("access_point", {})
+        claude_cfg  = app_config.get("claude_link", {"enabled": True})
 
         self._speech_wav.parent.mkdir(parents=True, exist_ok=True)
 
@@ -197,6 +202,9 @@ class Fishseus:
             "bluetooth", bt_cfg, BluetoothService, BluetoothConfig)
         self.spotify = self._start_optional(
             "spotify", spotify_cfg, SpotifyService, SpotifyConfig)
+        self.claude_link = self._start_optional(
+            "claude_link", claude_cfg, ClaudeLinkService, ClaudeLinkConfig,
+            before_init=lambda svc: setattr(svc, "on_message", self._on_announcement))
 
         # Assistant
         _log("init", "Starting assistant service…")
@@ -209,6 +217,7 @@ class Fishseus:
             get_bluetooth    = lambda: self.bluetooth,
             get_spotify      = lambda: self.spotify,
             get_access_point = lambda: self.access_point,
+            get_claude_link  = lambda: self.claude_link,
         )
         # Paths in the "assistant" section are relative to config/; memory and
         # the conversation log default to data/.
@@ -253,6 +262,16 @@ class Fishseus:
                 pass
             else:
                 self._handle_sensor_event(event)
+                continue
+
+            # Speak anything Claude (or the outbox) sent while we were busy.
+            try:
+                text, source = self._announce_queue.get_nowait()
+            except Empty:
+                pass
+            else:
+                _log(source, f"Announcing: '{text}'")
+                self._speak_with_motion(text, "speaking", cooldown=True)
                 continue
 
             _log("listen", "Waiting for speech…")
@@ -452,7 +471,11 @@ class Fishseus:
     # Service construction helpers
     # -------------------------------------------------------------------
 
-    def _start_optional(self, name: str, cfg: dict, service_cls, config_cls):
+    def _on_announcement(self, text: str, source: str) -> None:
+        """Called from claude_link worker threads — enqueue for the main loop."""
+        self._announce_queue.put((text, source))
+
+    def _start_optional(self, name: str, cfg: dict, service_cls, config_cls, before_init=None):
         """Build and initialise an opt-in service ("enabled": true), or return None."""
         cfg = dict(cfg)
         if not cfg.pop("enabled", False):
@@ -461,6 +484,8 @@ class Fishseus:
         _log("init", f"Starting {name} service…")
         try:
             service = service_cls(config_cls(**cfg))
+            if before_init is not None:
+                before_init(service)
             service.initialize()
             return service
         except Exception as exc:
@@ -592,7 +617,7 @@ class Fishseus:
             except Exception as exc:
                 _log("shutdown", f"Vision error: {exc}")
 
-        for name in ("spotify", "bluetooth", "access_point"):
+        for name in ("claude_link", "spotify", "bluetooth", "access_point"):
             service = getattr(self, name)
             if service is not None:
                 try:

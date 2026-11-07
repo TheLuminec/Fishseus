@@ -6,3 +6,8 @@ __pycache__/
 config/secrets.json
 data/spotify_token.json
 tmp/
+
+# Runtime state written by the running fish (household conversations: keep out of git)
+data/
+config/config/
+.claude/

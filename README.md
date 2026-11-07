@@ -14,6 +14,7 @@ Fishseus is a modular voice-assistant stack for a motorized Billy Bass-style fis
 - [`bluetooth/README.md`](bluetooth/README.md): Bluetooth speaker pairing and connection (BlueZ).
 - [`spotify/README.md`](spotify/README.md): voice-requested Spotify playback via spotipy.
 - [`access_point/README.md`](access_point/README.md): the isolated "Fishseus" Wi-Fi network for the turret ESP32s.
+- [`claude_link/README.md`](claude_link/README.md): the fish ↔ Claude Code link (`ask_claude` tool, `bin/fishsay` outbox).
 
 ## End-to-end flow
 1. `audio` captures speech and writes/streams WAV PCM.

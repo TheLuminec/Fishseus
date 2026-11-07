@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from access_point.access_point_service import AccessPointService
     from assistant.assistant_service import AssistantService
     from bluetooth.bluetooth_service import BluetoothService
+    from claude_link.claude_link_service import ClaudeLinkService
     from motion.motion_service import MotionService
     from sensors.sensor_service import SensorService
     from spotify.spotify_service import SpotifyService
@@ -58,6 +59,7 @@ def build_tool_registry(
     get_bluetooth: Callable[[], Optional["BluetoothService"]] = _none,
     get_spotify: Callable[[], Optional["SpotifyService"]] = _none,
     get_access_point: Callable[[], Optional["AccessPointService"]] = _none,
+    get_claude_link: Callable[[], Optional["ClaudeLinkService"]] = _none,
     overrides_path: Optional[Path] = DEFAULT_OVERRIDES_PATH,
 ) -> ToolRegistry:
     """
@@ -324,6 +326,16 @@ def build_tool_registry(
     has_spotify = running(get_spotify)
     has_bluetooth = running(get_bluetooth)
 
+    def ask_claude(message: str) -> str:
+        link = get_claude_link()
+        if link is None:
+            return "My line to Claude is down."
+        if not message.strip():
+            return "What should I ask Claude?"
+        if not link.ask(message, source="voice"):
+            return "I'm still waiting on Claude from last time."
+        return "Okay, I'm asking Claude. I'll tell you when I hear back."
+
     def ex(user: str, args: Optional[dict] = None, **extra: str) -> dict:
         return {"user": user, "args": args or {}, **extra}
 
@@ -470,6 +482,23 @@ def build_tool_registry(
              network_clients, "safe", True, False,
              examples=[ex("what's connected to your wifi?")],
              available=running(get_access_point)),
+
+        # --- Claude (Claude Code on the Pi: answers, or relays to other agents) ---
+        Tool("ask_claude",
+             "Pass a message to Claude, a smarter AI agent that runs this fish. Claude answers "
+             "out loud in a minute or so, and can relay messages to other Claude agents. "
+             "Args: message (the person's request, in their words, with any needed context).",
+             ask_claude, "safe", True, False,
+             hint="Use when the person says 'ask Claude', 'tell Claude', or 'tell the agents'. "
+                  "Also use for hard research or reasoning questions you can't answer well, "
+                  "and for anything about the fish's own code, setup or other agents. "
+                  "Don't use it for simple chat.",
+             examples=[
+                 ex("ask Claude why the sky is blue", {"message": "Why is the sky blue?"}),
+                 ex("tell Claude the turret camera is offline again",
+                    {"message": "The turret camera is offline again."}),
+             ],
+             available=running(get_claude_link)),
     ]
     for t in _tools:
         registry.register(t)

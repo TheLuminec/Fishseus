@@ -1,0 +1,20 @@
+# systemd *user* unit for the Fishseus assistant (no sudo needed; linger is on for `fish`).
+#   install:  ln -sf ~/fishseus/deploy/fishseus.service ~/.config/systemd/user/
+#             systemctl --user daemon-reload && systemctl --user enable --now fishseus
+#   logs:     journalctl --user -u fishseus -f
+[Unit]
+Description=Fishseus Billy Bass assistant
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/fishseus
+ExecStart=%h/fishseus/web/.venv/bin/python -u fishseus.py --port 8000
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

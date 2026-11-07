@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# fishsay — make the fish say something (picked up by claude_link's outbox).
+#   fishsay "Dinner is ready"      |   echo "hi" | fishsay
+set -euo pipefail
+OUTBOX="${FISHSEUS_OUTBOX:-$HOME/Docs/fish/say}"
+mkdir -p "$OUTBOX"
+text="${*:-$(cat)}"
+[ -n "$text" ] || { echo "usage: fishsay <text>" >&2; exit 1; }
+tmp="$(mktemp "$OUTBOX/.say.XXXXXX")"
+printf '%s\n' "$text" > "$tmp"
+mv "$tmp" "$OUTBOX/$(date +%s%N).txt"   # atomic: the watcher only reads *.txt
